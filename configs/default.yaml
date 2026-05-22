@@ -1,0 +1,20 @@
+# DermArbiter — General Settings
+
+general:
+  project_name: dermarbiter
+  version: "0.1.0"
+  debug: false
+  log_level: INFO    # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  seed: 42
+
+paths:
+  output_dir: outputs/
+  log_dir: outputs/logs/
+  cache_dir: outputs/cache/
+  config_dir: configs/
+
+runtime:
+  device: auto       # auto, cuda, cpu, mps
+  num_workers: 4
+  max_retries: 3
+  timeout_seconds: 120

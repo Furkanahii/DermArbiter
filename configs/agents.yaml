@@ -1,0 +1,54 @@
+# DermArbiter — Agent Configurations
+
+agents:
+  specialist:
+    name: Specialist
+    description: Domain-expert dermatology agent with focused clinical reasoning
+    model: gemini-2.5-flash
+    backend: google_api
+    temperature: 0.1
+    max_tokens: 2048
+    top_p: 0.95
+    system_prompt_key: specialist
+
+  generalist:
+    name: Generalist
+    description: Broad medical knowledge agent with multimodal visual grounding
+    model: medgemma-4b
+    backend: local_hf
+    device: cuda
+    quantization: 4bit
+    temperature: 0.3
+    max_tokens: 2048
+    top_p: 0.9
+    system_prompt_key: generalist
+
+  skeptic:
+    name: Skeptic
+    description: Adversarial agent that challenges diagnoses and raises counter-arguments
+    model: Qwen/Qwen3-8B-Instruct
+    backend: local_hf
+    device: cuda
+    quantization: 4bit
+    temperature: 0.5
+    max_tokens: 2048
+    top_p: 0.9
+    system_prompt_key: skeptic
+
+  moderator:
+    name: Moderator
+    description: Synthesizes debate arguments and produces final consensus diagnosis
+    model: gemini-2.5-flash
+    backend: google_api
+    temperature: 0.0
+    max_tokens: 4096
+    top_p: 1.0
+    system_prompt_key: moderator
+
+debate:
+  max_rounds: 3
+  token_budget_per_turn: 100
+  early_exit_threshold: 0.2
+  require_unanimous: false
+  enable_tool_use: true
+  voting_strategy: weighted_confidence

@@ -1,4 +1,4 @@
-"""DermArbiter core — Blackboard, Config, and Model Router."""
+"""DermArbiter core — Blackboard, Config, Model Router, and Orchestrator."""
 
 from dermarbiter.core.blackboard import (
     AgentBrief,
@@ -9,6 +9,7 @@ from dermarbiter.core.blackboard import (
 )
 from dermarbiter.core.config import DermArbiterConfig, load_config
 from dermarbiter.core.model_router import ModelBackend, ModelRouter
+from dermarbiter.core.orchestrator import DermArbiterOrchestrator
 
 __all__ = [
     "AgentBrief",
@@ -20,4 +21,6 @@ __all__ = [
     "load_config",
     "ModelBackend",
     "ModelRouter",
+    "DermArbiterOrchestrator",
 ]
+

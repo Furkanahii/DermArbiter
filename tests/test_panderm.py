@@ -14,6 +14,12 @@ from pathlib import Path
 
 import pytest
 
+import importlib.util
+_has_torchvision = importlib.util.find_spec("torchvision") is not None
+_skip_no_torchvision = pytest.mark.skipif(
+    not _has_torchvision, reason="torchvision not installed"
+)
+
 from dermarbiter.tools.base_tool import BaseTool, ToolOutput, ToolRegistry
 from dermarbiter.tools.panderm_tool import (
     DERMATOLOGY_CLASSES,
@@ -143,6 +149,7 @@ class TestPanDermValidation:
 # 3. Output format tests (with mocked model)
 # ═══════════════════════════════════════════════════════════════════════════
 
+@_skip_no_torchvision
 class TestPanDermOutput:
     """Test that the tool output matches the expected format."""
 
@@ -288,12 +295,17 @@ def _make_fake_tool_loaded(tool: PanDermClassifier) -> None:
             return torch.randn(x.shape[0], 1024)
 
     tool._device = torch.device("cpu")
-    tool._transform = tool._build_transform()
+    try:
+        tool._transform = tool._build_transform()
+    except ImportError:
+        # torchvision not available — use a minimal identity transform
+        tool._transform = lambda img: torch.randn(3, 224, 224)
     tool._model = _FakeEncoder()
     tool._head = nn.Linear(1024, 7)
     tool._loaded = True
 
 
+@_skip_no_torchvision
 class TestPanDermLazyLoading:
     """Test the lazy model loading behaviour."""
 
@@ -345,6 +357,7 @@ class TestPanDermLazyLoading:
 # 5. Error handling tests
 # ═══════════════════════════════════════════════════════════════════════════
 
+@_skip_no_torchvision
 class TestPanDermErrorHandling:
     """Test graceful error handling."""
 

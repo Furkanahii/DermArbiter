@@ -18,6 +18,12 @@ import pytest
 import torch
 import torch.nn as nn
 
+import importlib.util
+_has_torchvision = importlib.util.find_spec("torchvision") is not None
+_skip_no_torchvision = pytest.mark.skipif(
+    not _has_torchvision, reason="torchvision not installed"
+)
+
 from dermarbiter.tools.base_tool import BaseTool, ToolOutput, ToolRegistry
 from dermarbiter.tools.dermogpt_tool import DermoGPTVQA
 from dermarbiter.tools.make_tool import (
@@ -59,12 +65,20 @@ def _make_fake_make_loaded(tool: MAKEAnnotator) -> None:
     tool._text_features = text_feats
 
     # Fake preprocess: just resize and tensor
-    from torchvision import transforms
-
-    tool._preprocess = transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.ToTensor(),
-    ])
+    try:
+        from torchvision import transforms
+        tool._preprocess = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+        ])
+    except ImportError:
+        # Fallback: minimal PIL-based transform
+        def _fallback_preprocess(img):
+            img = img.resize((224, 224))
+            import numpy as np
+            arr = np.array(img).astype(np.float32) / 255.0
+            return torch.from_numpy(arr).permute(2, 0, 1)
+        tool._preprocess = _fallback_preprocess
 
     tool._loaded = True
 
@@ -183,6 +197,7 @@ class TestMAKEValidation:
         assert "error" in output.result
 
 
+@_skip_no_torchvision
 class TestMAKEOutput:
     """MAKE output format with mock model."""
 
@@ -237,6 +252,7 @@ class TestMAKEOutput:
         assert "model_version" in output.result
 
 
+@_skip_no_torchvision
 class TestMAKELifecycle:
     """MAKE lazy loading and unloading."""
 

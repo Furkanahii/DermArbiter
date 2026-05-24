@@ -13,53 +13,15 @@ critical perspective.
 
 from __future__ import annotations
 
-import json
 import logging
-import re
 from typing import Any, Optional
 
 from dermarbiter.agents.base_agent import BaseAgent
 from dermarbiter.core.blackboard import AgentBrief, EvidenceCard
+from dermarbiter.core.utils import extract_json
 
 logger = logging.getLogger(__name__)
 
-
-# ---------------------------------------------------------------------------
-# JSON extraction helper
-# ---------------------------------------------------------------------------
-
-def _extract_json(text: str) -> dict[str, Any]:
-    """
-    Best-effort extraction of a JSON object from free-form LLM output.
-
-    Strategy:
-        1. Look for a fenced ``json`` code block (```json ... ```).
-        2. Fall back to the first ``{ ... }`` substring.
-        3. Return an empty dict if nothing parseable is found.
-
-    Args:
-        text: Raw LLM response text.
-
-    Returns:
-        Parsed dict, or ``{}`` on failure.
-    """
-    # Strategy 1: fenced code block
-    fence_match = re.search(r"```json\s*\n?(.*?)\n?\s*```", text, re.DOTALL)
-    if fence_match:
-        try:
-            return json.loads(fence_match.group(1))
-        except json.JSONDecodeError:
-            pass
-
-    # Strategy 2: raw { ... } block (outermost braces)
-    brace_match = re.search(r"\{.*\}", text, re.DOTALL)
-    if brace_match:
-        try:
-            return json.loads(brace_match.group(0))
-        except json.JSONDecodeError:
-            pass
-
-    return {}
 
 
 # ---------------------------------------------------------------------------
@@ -170,7 +132,7 @@ class SkepticAgent(BaseAgent):
 
         try:
             raw_response = self._call_llm(messages)
-            parsed = _extract_json(raw_response)
+            parsed = extract_json(raw_response)
 
             if parsed and "top3_differential" in parsed:
                 cited = [

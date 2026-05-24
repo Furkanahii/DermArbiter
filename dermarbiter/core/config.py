@@ -94,15 +94,20 @@ class DebateConfig(BaseModel):
         description="Maximum number of debate rounds before forced synthesis.",
     )
     early_exit_threshold: float = Field(
-        default=0.85,
+        default=0.70,
         ge=0.0,
         le=1.0,
-        description="Consensus score at which the moderator may exit early.",
+        description="Min avg confidence for early exit (confidence_threshold).",
     )
     max_tokens_per_turn: int = Field(
-        default=1024,
-        ge=64,
+        default=100,
+        ge=16,
         description="Token budget per debate turn.",
+    )
+    global_token_budget: int = Field(
+        default=50_000,
+        ge=1000,
+        description="Total token budget for the full pipeline run.",
     )
     turn_order: list[str] = Field(
         default_factory=lambda: ["specialist", "generalist", "skeptic"],
@@ -111,6 +116,47 @@ class DebateConfig(BaseModel):
     moderator_role: str = Field(
         default="moderator",
         description="Role identifier for the moderator agent.",
+    )
+
+    # --- Early Exit Gating ---
+    min_agreement: int = Field(
+        default=2,
+        ge=1,
+        description="Minimum number of agents that must agree on top-1 for early exit.",
+    )
+    confidence_floor: float = Field(
+        default=0.50,
+        ge=0.0,
+        le=1.0,
+        description="No individual agent's confidence may be below this for early exit.",
+    )
+    require_no_flags: bool = Field(
+        default=True,
+        description="If True, abort early exit when any agent has disagreement flags.",
+    )
+    require_unanimous: bool = Field(
+        default=False,
+        description="If True, ALL agents must agree on top-1 for early exit.",
+    )
+
+    # --- Synthesis ---
+    voting_strategy: str = Field(
+        default="weighted_confidence",
+        description="Consensus strategy: 'weighted_confidence', 'majority', 'rank_fusion'.",
+    )
+    specialist_weight: float = Field(
+        default=1.2,
+        ge=0.0,
+        description="Weight multiplier for the specialist's opinion in synthesis.",
+    )
+    rank_weights: list[float] = Field(
+        default_factory=lambda: [1.0, 0.6, 0.3],
+        description="Positional weight for rank 1, 2, 3 in differential lists.",
+    )
+    top_k_diagnoses: int = Field(
+        default=5,
+        ge=1,
+        description="Maximum number of diagnoses to include in final ranking.",
     )
 
 

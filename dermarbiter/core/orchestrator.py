@@ -46,17 +46,23 @@ class DermArbiterOrchestrator:
         max_tokens_per_turn: int = 100,
         global_token_budget: int = 50000,
         turn_order: List[str] | None = None,
+        specialist_weight: float = 1.2,
+        rank_weights: List[float] | None = None,
+        top_k_diagnoses: int = 5,
     ) -> None:
         """
         Initializes the orchestrator with required agents, tools, and execution limits.
 
         Args:
-            agents: Dict mapping role strings (specialist, generalist, skeptic, moderator) to agents.
+            agents: Dict mapping role strings to agents.
             tool_registry: Registry containing the diagnostic tool pool.
             max_rounds: Maximum debate rounds in Phase 4.
             max_tokens_per_turn: Max token count limit per debate turn.
             global_token_budget: Maximum allowed tokens for the entire panel run.
             turn_order: Explicit turn sequence for Phase 4.
+            specialist_weight: Weight multiplier for specialist in synthesis.
+            rank_weights: Positional weights for rank 1, 2, 3 in synthesis.
+            top_k_diagnoses: Max diagnoses in final ranking.
         """
         self.agents = agents
         self.tool_registry = tool_registry
@@ -64,6 +70,9 @@ class DermArbiterOrchestrator:
         self.max_tokens_per_turn = max_tokens_per_turn
         self.global_token_budget = global_token_budget
         self.turn_order = turn_order
+        self.specialist_weight = specialist_weight
+        self.rank_weights = rank_weights
+        self.top_k_diagnoses = top_k_diagnoses
 
         # Compile the graph
         self.graph = self._build_graph()
@@ -144,7 +153,13 @@ class DermArbiterOrchestrator:
     def _node_synthesis(self, state: Any) -> BlackboardState:
         """Phase 5 node wrapper."""
         state_obj = self._ensure_state_object(state)
-        synthesis(state_obj, self.agents)
+        synthesis(
+            state_obj,
+            self.agents,
+            specialist_weight=self.specialist_weight,
+            rank_weights=self.rank_weights,
+            top_k=self.top_k_diagnoses,
+        )
         return state_obj
 
     def _decide_next_phase(self, state: Any) -> str:

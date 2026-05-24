@@ -1,4 +1,5 @@
 # DermArbiter — General Settings
+# ═══════════════════════════════════════════════════════════════
 
 general:
   project_name: dermarbiter
@@ -12,9 +13,32 @@ paths:
   log_dir: outputs/logs/
   cache_dir: outputs/cache/
   config_dir: configs/
+  weights_dir: weights/           # Model weights directory
+  data_dir: data/                 # Dataset directory
+  experiments_dir: experiments/   # Experiment scripts
 
 runtime:
   device: auto       # auto, cuda, cpu, mps
   num_workers: 4
   max_retries: 3
   timeout_seconds: 120
+
+# ═══════════════════════════════════════════════════════════════
+# Experiment Tracking
+# ═══════════════════════════════════════════════════════════════
+experiment:
+  name: "default"
+  tags: []
+  save_predictions: true          # Save per-sample predictions
+  save_debate_logs: true          # Save full debate transcripts
+  save_evidence_cards: true       # Save evidence cards to JSON
+  results_dir: outputs/results/
+
+# ═══════════════════════════════════════════════════════════════
+# Data & Model Paths
+# ═══════════════════════════════════════════════════════════════
+data:
+  chroma_cases_dir: data/chroma_cases/
+  chroma_guidelines_dir: data/chroma_guidelines/
+  ontology_json: data/skin_disease_ontology.json
+

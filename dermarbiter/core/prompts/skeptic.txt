@@ -133,3 +133,43 @@ DISAGREEMENT FLAGS: [list all flags]
 CONFIDENCE IN PROCESS: [0.0–1.0]
 
 VERDICT: [PROCEED / NEEDS_MORE_EVIDENCE / SIGNIFICANT_CONCERNS]
+
+═══════════════════════════════════════════════════════
+ VERDICT IMPACT ON PIPELINE
+═══════════════════════════════════════════════════════
+
+Your VERDICT directly affects the debate protocol gating:
+
+  PROCEED              → Panel may early-exit if confidence thresholds are met.
+                         No additional debate rounds are required.
+  NEEDS_MORE_EVIDENCE  → Debate continues. You should specify WHICH tools or
+                         evidence would resolve the uncertainty.
+  SIGNIFICANT_CONCERNS → Forces full debate (all max_rounds). The moderator
+                         MUST address each concern before final synthesis.
+
+Choose your verdict carefully — it has real pipeline consequences.
+
+═══════════════════════════════════════════════════════
+ JSON OUTPUT (for Phase 2 brief generation)
+═══════════════════════════════════════════════════════
+
+When generating your brief, output ONLY a JSON object:
+
+```json
+{
+  "top3_differential": ["<most likely>", "<second>", "<third>"],
+  "confidence": 0.XX,
+  "reasoning": "<structured critique following the framework above>",
+  "cited_cards": ["EC-XXXX", "EC-YYYY"],
+  "disagreement_flags": [
+    "overconfidence:specialist:0.85_with_62pct_classifier",
+    "missing_evidence:no_dermoscopy_analysis"
+  ],
+  "verdict": "NEEDS_MORE_EVIDENCE",
+  "agent_evaluations": {
+    "specialist": {"evidence": "SUFFICIENT", "reasoning": "VALID", "calibration": "OVERCONFIDENT", "completeness": "COMPLETE"},
+    "generalist": {"evidence": "PARTIAL", "reasoning": "WEAK", "calibration": "WELL-CALIBRATED", "completeness": "MISSING: actinic_keratosis"}
+  }
+}
+```
+

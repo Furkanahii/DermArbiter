@@ -273,6 +273,9 @@ def targeted_debate(
 def synthesis(
     state: BlackboardState,
     agents: Dict[str, BaseAgent],
+    specialist_weight: float = 1.2,
+    rank_weights: List[float] | None = None,
+    top_k: int = 5,
 ) -> None:
     """
     Phase 5: Synthesis
@@ -280,22 +283,32 @@ def synthesis(
     Aggregates expert agent opinions to produce consensus diagnoses ranking,
     calculates consensus score, extracts dissent notes, and asks the Moderator
     to compile the final clinical report.
+
+    Args:
+        state: The shared blackboard state.
+        agents: Dict of role → agent.
+        specialist_weight: Multiplier for specialist's contribution (default 1.2).
+        rank_weights: Positional weights for rank 1, 2, 3 (default [1.0, 0.6, 0.3]).
+        top_k: Maximum number of diagnoses in the final ranking (default 5).
     """
     logger.info("Starting Phase 5: Synthesis")
+    
+    if rank_weights is None:
+        rank_weights = [1.0, 0.6, 0.3]
     
     # 1. Rank consensus diagnoses based on weighted confidence
     scores: Dict[str, float] = {}
     for role, brief in state.briefs.items():
         if role == "moderator":
             continue
+        role_weight = specialist_weight if role == "specialist" else 1.0
         for rank, dx in enumerate(brief.top3_differential):
             dx_clean = dx.strip().lower()
-            rank_weight = 1.0 if rank == 0 else (0.6 if rank == 1 else 0.3)
-            role_weight = 1.2 if role == "specialist" else 1.0
-            scores[dx_clean] = scores.get(dx_clean, 0.0) + brief.confidence * rank_weight * role_weight
+            rw = rank_weights[rank] if rank < len(rank_weights) else 0.1
+            scores[dx_clean] = scores.get(dx_clean, 0.0) + brief.confidence * rw * role_weight
             
     sorted_dx = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-    state.final_diagnosis = [dx for dx, _ in sorted_dx[:5]]
+    state.final_diagnosis = [dx for dx, _ in sorted_dx[:top_k]]
     
     # 2. Compute consensus score based on primary diagnoses agreement
     primaries = [

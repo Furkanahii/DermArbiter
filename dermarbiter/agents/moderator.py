@@ -283,12 +283,18 @@ class ModeratorAgent(BaseAgent):
         Determine whether the panel has reached sufficient consensus to
         skip remaining debate rounds.
 
-        Early exit conditions (ALL must be true):
-            1. At least 2 briefs submitted.
-            2. All agents agree on the primary (first) diagnosis.
-            3. The minimum confidence across all briefs exceeds the
-               ``early_exit_threshold`` from agent config (default 0.50).
-            4. No agent has any disagreement flags.
+        The gating criteria are read from the agent config's ``extra``
+        dict (populated from ``agents.yaml``'s ``debate.early_exit``
+        section).  Defaults are used when keys are missing.
+
+        Criteria (ALL must pass):
+            1. At least ``min_briefs`` (2) briefs submitted.
+            2. At least ``min_agreement`` agents agree on the primary dx.
+               If ``require_unanimous`` is True, ALL must agree.
+            3. Every agent's confidence ≥ ``confidence_floor`` (0.50).
+            4. Average confidence ≥ ``early_exit_threshold`` (0.70).
+            5. If ``require_no_flags`` is True, no agent may have
+               disagreement flags.
 
         Args:
             briefs: Mapping from agent role to its submitted
@@ -297,22 +303,31 @@ class ModeratorAgent(BaseAgent):
         Returns:
             ``True`` if the moderator recommends early exit.
         """
+        # --- Read thresholds from config ---
+        extra = self._config.extra
+        min_agreement = int(extra.get("min_agreement", 2))
+        confidence_threshold = float(extra.get("early_exit_threshold", 0.70))
+        confidence_floor = float(extra.get("confidence_floor", 0.50))
+        require_no_flags = bool(extra.get("require_no_flags", True))
+        require_unanimous = bool(extra.get("require_unanimous", False))
+
+        # --- Criterion 1: Minimum briefs ---
         if len(briefs) < 2:
             logger.debug("[%s] Too few briefs (%d) for early exit.", self.role, len(briefs))
             return False
 
-        # Collect primary diagnoses (first element of top3) and check disagreement flags
+        # --- Collect data ---
         primaries: list[str] = []
         confidences: list[float] = []
         for role, brief in briefs.items():
-            if brief.disagreement_flags:
+            # Criterion 5: No disagreement flags
+            if require_no_flags and brief.disagreement_flags:
                 logger.info(
-                    "[%s] Early exit check failed: agent %s has disagreement flags: %s",
-                    self.role,
-                    role,
-                    brief.disagreement_flags,
+                    "[%s] Early exit FAILED: agent %s has flags: %s",
+                    self.role, role, brief.disagreement_flags,
                 )
                 return False
+
             if brief.top3_differential:
                 primaries.append(brief.top3_differential[0].strip().lower())
             confidences.append(brief.confidence)
@@ -320,26 +335,57 @@ class ModeratorAgent(BaseAgent):
         if not primaries:
             return False
 
-        # Check unanimity on primary diagnosis
-        unanimous = len(set(primaries)) == 1
+        # --- Criterion 3: Confidence floor ---
+        min_conf = min(confidences) if confidences else 0.0
+        if min_conf < confidence_floor:
+            logger.info(
+                "[%s] Early exit FAILED: min confidence %.2f < floor %.2f",
+                self.role, min_conf, confidence_floor,
+            )
+            return False
 
-        # Check minimum confidence threshold
-        threshold = self._config.extra.get("early_exit_threshold", 0.50)
-        above_threshold = all(c >= threshold for c in confidences)
+        # --- Criterion 4: Average confidence ---
+        avg_conf = sum(confidences) / len(confidences)
+        if avg_conf < confidence_threshold:
+            logger.info(
+                "[%s] Early exit FAILED: avg confidence %.2f < threshold %.2f",
+                self.role, avg_conf, confidence_threshold,
+            )
+            return False
 
-        should_exit = unanimous and above_threshold
+        # --- Criterion 2: Agreement on primary dx ---
+        from collections import Counter
+        counts = Counter(primaries)
+        most_common_dx, most_common_count = counts.most_common(1)[0]
 
+        if require_unanimous:
+            unanimous = len(set(primaries)) == 1
+            if not unanimous:
+                logger.info(
+                    "[%s] Early exit FAILED: unanimity required but primaries=%s",
+                    self.role, primaries,
+                )
+                return False
+        else:
+            if most_common_count < min_agreement:
+                logger.info(
+                    "[%s] Early exit FAILED: only %d agents agree on '%s' (need %d)",
+                    self.role, most_common_count, most_common_dx, min_agreement,
+                )
+                return False
+
+        # --- All criteria passed ---
         logger.info(
-            "[%s] Early exit check — unanimous=%s, min_conf=%.2f, "
-            "threshold=%.2f, exit=%s",
+            "[%s] Early exit PASSED — agreement=%d/%d on '%s', "
+            "avg_conf=%.2f, min_conf=%.2f",
             self.role,
-            unanimous,
-            min(confidences) if confidences else 0.0,
-            threshold,
-            should_exit,
+            most_common_count,
+            len(primaries),
+            most_common_dx,
+            avg_conf,
+            min_conf,
         )
-
-        return should_exit
+        return True
 
     def synthesize_final_report(self, blackboard: BlackboardState) -> str:
         """

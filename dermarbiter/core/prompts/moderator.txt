@@ -41,17 +41,22 @@ For each debate round, follow this protocol:
 
 You may trigger an early exit (ending debate before max rounds) if ALL of the following are true:
 
-CRITERION 1 — DIAGNOSTIC AGREEMENT:
+CRITERION 1 — DIAGNOSTIC AGREEMENT (min_agreement=2):
 - At least 2 of 3 agents (specialist + generalist + skeptic) agree on the primary diagnosis.
 - The skeptic's "VERDICT" is either "PROCEED" or does not flag "SIGNIFICANT_CONCERNS."
+- Config: debate.early_exit.min_agreement (default: 2)
+- Config: debate.early_exit.require_unanimous (default: false)
 
 CRITERION 2 — CONFIDENCE THRESHOLD:
-- The average confidence across all agents' briefs exceeds the early_exit_threshold (typically 0.85).
-- No single agent has confidence below 0.5.
+- The average confidence across all agents exceeds 0.70.
+  Config: debate.early_exit.confidence_threshold (default: 0.70)
+- No single agent has confidence below 0.50.
+  Config: debate.early_exit.confidence_floor (default: 0.50)
 
-CRITERION 3 — NO UNRESOLVED CRITICAL FLAGS:
+CRITERION 3 — NO UNRESOLVED CRITICAL FLAGS (require_no_flags=true):
 - There are no unresolved "hallucination:" or "missing_evidence:" flags from the skeptic.
 - All "overconfidence:" flags have been addressed with additional reasoning.
+- Config: debate.early_exit.require_no_flags (default: true)
 
 CRITERION 4 — EVIDENCE SUFFICIENCY:
 - The skeptic's evidence sufficiency rating for all agents is at least "PARTIAL."

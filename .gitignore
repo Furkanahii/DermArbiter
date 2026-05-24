@@ -35,9 +35,32 @@ ENV/
 *.h5
 
 # Data directories
-data/
+# We intentionally allow data/ in git for small reproducibility artifacts
+# (curated seed JSONLs, downloaded metadata CSVs, DermAgent provenance CSVs),
+# but exclude every large generated output below.
 chroma_db/
 outputs/
+
+# Generated outputs and downloaded images (per-dataset)
+data/chroma_*/
+data/ham10000/images/
+data/ham10000/HAM10000_images_*.zip
+data/ham10000/train.jsonl
+data/ham10000/val.jsonl
+data/ham10000/test.jsonl
+data/ham10000/dermagent_subset.jsonl
+data/fitzpatrick17k/images/
+data/fitzpatrick17k/train.jsonl
+data/fitzpatrick17k/val.jsonl
+data/fitzpatrick17k/test.jsonl
+data/derm7pt/
+data/skincon/
+data/skincap/
+data/SNU/
+
+# Experiment outputs
+experiments/results/
+experiments/runs/
 
 # Documents
 *.pdf

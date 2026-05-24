@@ -1,0 +1,100 @@
+# DermArbiter — Agent Configurations
+# ═══════════════════════════════════════════════════════════════
+# Each agent has: model config, tool access, and prompt reference.
+# The debate section controls gating, budgets, and thresholds.
+# ═══════════════════════════════════════════════════════════════
+
+agents:
+  specialist:
+    name: Specialist
+    description: Domain-expert dermatology agent with focused clinical reasoning
+    model: gemini-2.5-flash
+    backend: google_api
+    temperature: 0.1
+    max_tokens: 2048
+    top_p: 0.95
+    system_prompt_key: specialist
+    has_tool_access: true
+    allowed_tools:
+      - panderm_classifier
+      - make_annotator
+      - dermogpt_vqa
+      - guideline_rag
+      - uncertainty_probe
+
+  generalist:
+    name: Generalist
+    description: Broad medical knowledge agent with multimodal visual grounding
+    model: medgemma-4b
+    backend: local_hf
+    device: cuda
+    quantization: 4bit
+    temperature: 0.3
+    max_tokens: 2048
+    top_p: 0.9
+    system_prompt_key: generalist
+    has_tool_access: true
+    allowed_tools:
+      - panderm_classifier
+      - general_vqa
+      - case_rag
+      - fairness_probe
+
+  skeptic:
+    name: Skeptic
+    description: Adversarial agent that challenges diagnoses and raises counter-arguments
+    model: Qwen/Qwen3-8B-Instruct
+    backend: local_hf
+    device: cuda
+    quantization: 4bit
+    temperature: 0.5
+    max_tokens: 2048
+    top_p: 0.9
+    system_prompt_key: skeptic
+    has_tool_access: false
+    allowed_tools: []     # Skeptic has NO tool access (by design)
+
+  moderator:
+    name: Moderator
+    description: Synthesizes debate arguments and produces final consensus diagnosis
+    model: gemini-2.5-flash
+    backend: google_api
+    temperature: 0.0
+    max_tokens: 4096
+    top_p: 1.0
+    system_prompt_key: moderator
+    has_tool_access: true
+    allowed_tools:
+      - ontology_graph
+      - uncertainty_probe
+
+# ═══════════════════════════════════════════════════════════════
+# Debate Protocol Parameters
+# ═══════════════════════════════════════════════════════════════
+debate:
+  # --- Phase 4: Debate Rounds ---
+  max_rounds: 3                     # Max argument/rebuttal rounds
+  token_budget_per_turn: 100        # Max tokens per debate turn
+  global_token_budget: 50000        # Total token budget for full pipeline
+
+  # --- Phase 3: Early Exit Gating ---
+  early_exit:
+    enabled: true
+    min_agreement: 2                # At least N agents must agree on top-1
+    confidence_threshold: 0.70      # Min avg confidence for early exit
+    confidence_floor: 0.50          # No individual agent below this
+    require_no_flags: true          # Abort early exit if any agent has flags
+    require_unanimous: false        # true = all agents must agree
+
+  # --- Phase 5: Synthesis ---
+  synthesis:
+    voting_strategy: weighted_confidence  # weighted_confidence | majority | rank_fusion
+    specialist_weight: 1.2          # Specialist opinion weight multiplier
+    rank_weights: [1.0, 0.6, 0.3]  # Weight for rank 1, 2, 3 in differential
+    top_k_diagnoses: 5              # Max diagnoses in final ranking
+
+  # --- Turn Order ---
+  turn_order:
+    - specialist
+    - generalist
+    - skeptic

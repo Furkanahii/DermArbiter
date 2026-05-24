@@ -1,0 +1,77 @@
+# DermArbiter — Tool Pool Configurations
+
+tools:
+  panderm:
+    name: PanDerm
+    description: Universal dermatology foundation model for feature extraction
+    model_path: weights/panderm.pth
+    enabled: true
+    input_size: 224
+    embedding_dim: 768
+
+  make:
+    name: MAKE
+    description: Multi-attribute knowledge extraction model for dermatology
+    model_path: weights/make.pth
+    enabled: true
+    input_size: 224
+    num_attributes: 12
+
+  dermogpt:
+    name: DermGPT
+    description: Dermatology visual question answering via HuggingFace
+    hf_model_id: dermogpt/dermogpt-v1
+    enabled: true
+    max_length: 512
+
+  general_vqa:
+    name: GeneralVQA
+    description: General-purpose visual question answering for medical images
+    enabled: true
+    backend: gemini
+    max_tokens: 1024
+
+  case_rag:
+    name: CaseRAG
+    description: Retrieval-augmented generation over dermatology case databases
+    db_path: chroma_db/cases
+    collection: derm_cases
+    top_k: 5
+    enabled: true
+    embedding_model: all-MiniLM-L6-v2
+    chunk_size: 512
+    chunk_overlap: 64
+
+  guideline_rag:
+    name: GuidelineRAG
+    description: RAG over clinical dermatology guidelines and textbooks
+    db_path: chroma_db/guidelines
+    collection: derm_guidelines
+    top_k: 3
+    enabled: true
+    embedding_model: all-MiniLM-L6-v2
+    chunk_size: 1024
+    chunk_overlap: 128
+
+  ontology:
+    name: OntologyLookup
+    description: Dermatology ontology lookup for ICD-10, SNOMED-CT, and DermLex
+    enabled: true
+    ontology_sources:
+      - icd10
+      - snomed_ct
+      - dermlex
+
+  fairness_probe:
+    name: FairnessProbe
+    description: Evaluates diagnostic fairness across skin tones (Fitzpatrick scale)
+    enabled: true
+    fitzpatrick_types: [I, II, III, IV, V, VI]
+    disparity_threshold: 0.05
+
+  uncertainty_probe:
+    name: UncertaintyProbe
+    description: Quantifies prediction uncertainty and calibration quality
+    enabled: true
+    method: entropy
+    calibration_bins: 15

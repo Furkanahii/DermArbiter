@@ -1,0 +1,78 @@
+# DermArbiter — Benchmark Configurations
+
+benchmarks:
+  ham10000:
+    name: HAM10000
+    description: Human Against Machine with 10000 training images for skin lesion classification
+    data_dir: data/ham10000/
+    split: test
+    task: classification
+    num_classes: 7
+    metrics:
+      - accuracy
+      - balanced_accuracy
+      - f1_macro
+      - auroc
+      - sensitivity
+      - specificity
+    class_names:
+      - akiec   # Actinic keratoses / Bowen's disease
+      - bcc     # Basal cell carcinoma
+      - bkl     # Benign keratosis
+      - df      # Dermatofibroma
+      - mel     # Melanoma
+      - nv      # Melanocytic nevi
+      - vasc    # Vascular lesions
+
+  derm7pt:
+    name: Derm7pt
+    description: Seven-point checklist dermatology dataset for dermoscopic analysis
+    data_dir: data/derm7pt/
+    split: test
+    task: classification
+    metrics:
+      - accuracy
+      - balanced_accuracy
+      - f1_macro
+      - auroc
+    num_classes: 2
+
+  skincon:
+    name: SkinCon
+    description: Skin concept annotations for dermatology image understanding
+    data_dir: data/skincon/
+    split: test
+    task: concept_detection
+    metrics:
+      - accuracy
+      - f1_macro
+      - precision
+      - recall
+
+  skincap:
+    name: SkinCap
+    description: Skin image captioning and report generation benchmark
+    data_dir: data/skincap/
+    split: test
+    task: captioning
+    metrics:
+      - bleu_4
+      - rouge_l
+      - meteor
+      - bertscore
+      - clinical_accuracy
+
+  fitzpatrick17k:
+    name: Fitzpatrick17k
+    description: Dermatology images annotated with Fitzpatrick skin type for fairness evaluation
+    data_dir: data/fitzpatrick17k/
+    split: test
+    task: classification
+    metrics:
+      - accuracy
+      - balanced_accuracy
+      - f1_macro
+      - equalized_odds
+      - demographic_parity
+    fitzpatrick_types: [I, II, III, IV, V, VI]
+    num_classes: 114

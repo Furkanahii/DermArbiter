@@ -1,0 +1,66 @@
+# DermArbiter — Experiment Configurations
+# ═══════════════════════════════════════════════════════════════
+# Controls ablation studies, experiment sweeps, and metric tracking.
+# Referenced by the experiments/ module and CLI runners.
+# ═══════════════════════════════════════════════════════════════
+
+experiments:
+  default_output_dir: results/
+  default_data_path: data/sample_cases.jsonl
+
+  # ─────────────────────────────────────────────────────────────
+  # Ablation Study Matrix
+  # ─────────────────────────────────────────────────────────────
+  ablation:
+    # Agent-composition ablations — each list is one experiment variant
+    agent_variants:
+      - [specialist, generalist, skeptic, moderator]  # full ensemble
+      - [specialist, generalist, moderator]           # no skeptic
+      - [specialist, skeptic, moderator]              # no generalist
+      - [specialist, moderator]                       # minimal (baseline)
+
+    # Tool ablations — systematically remove one tool at a time
+    tool_variants:
+      remove_one_at_a_time: true
+      tools_to_test:
+        - panderm_classifier
+        - make_annotator
+        - fairness_probe
+        - uncertainty_probe
+        - case_rag
+
+    # Debate-round ablations — vary number of debate rounds
+    round_variants: [0, 1, 2, 3, 5]
+
+  # ─────────────────────────────────────────────────────────────
+  # Reporting & Metrics
+  # ─────────────────────────────────────────────────────────────
+  reporting:
+    metrics:
+      - accuracy
+      - balanced_accuracy
+      - macro_f1
+      - weighted_f1
+      - ece                     # Expected Calibration Error
+      - brier_score
+
+    fairness_metrics:
+      - equalized_odds
+      - demographic_parity
+      - calibration_gap
+      - delta_accuracy          # Max accuracy gap across Fitzpatrick types
+
+    # Output formats for experiment reports
+    export_formats:
+      - json
+      - csv
+      - latex                   # For paper tables
+
+  # ─────────────────────────────────────────────────────────────
+  # Reproducibility
+  # ─────────────────────────────────────────────────────────────
+  reproducibility:
+    save_full_debate_logs: true
+    save_per_sample_predictions: true
+    save_evidence_cards: true
+    snapshot_config: true         # Copy configs into results dir

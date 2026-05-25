@@ -56,3 +56,13 @@ htmlcov/
 # Logs
 *.log
 logs/
+
+# Results
+results/
+
+# Sample data is tracked, but not large datasets
+!data/sample_cases.jsonl
+
+# Model cache
+.cache/
+huggingface/

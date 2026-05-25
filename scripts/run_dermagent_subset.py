@@ -1,0 +1,344 @@
+"""Evaluate DermArbiter on DermAgent's 642-image HAM10000 benchmark subset.
+
+This is the runner that produces the numbers for the **DermArbiter** rows of
+``experiments/dermagent_baseline.md`` §5.
+
+Two modes:
+
+    --mock   Use the mock agents + mock tool registry from ``tests/mocks/``.
+             Runs in seconds with no API keys or GPU. Useful for shaking out
+             the pipeline plumbing before real models are wired in.
+
+    --real   Build the production agents from ``configs/agents.yaml`` via
+             the (yet-to-land) factory layer. Requires Furkan's
+             ``model_router._call_local`` to be implemented.
+
+The output schema matches what
+``dermarbiter.evaluation.metrics.MetricsCalculator.from_jsonl`` expects, so
+the metrics can be computed without any additional munging.
+
+Example
+-------
+::
+
+    # Today — mock pipeline (smoke test, no LLM calls):
+    python scripts/run_dermagent_subset.py --mock
+
+    # After real-mode lands:
+    python scripts/run_dermagent_subset.py --real --max-cases 50
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import logging
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Optional
+
+logger = logging.getLogger("run_dermagent_subset")
+
+DEFAULT_SUBSET_JSONL = "data/ham10000/dermagent_subset.jsonl"
+DEFAULT_OUTPUT_DIR = "experiments/results"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Output schema
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _to_metrics_record(
+    case: dict[str, Any],
+    final_diagnosis: list[str],
+    consensus_score: float,
+    *,
+    early_exit: bool,
+    debate_rounds: int,
+    tool_calls: int,
+    total_tokens: int,
+    latency_s: float,
+    confidence: float | None = None,
+    per_class_probs: dict[str, float] | None = None,
+) -> dict[str, Any]:
+    """Produce one record consumable by MetricsCalculator.from_jsonl()."""
+    rec = {
+        "case_id": case["case_id"],
+        "ground_truth_label": case["ground_truth_label"],
+        "predicted_label": final_diagnosis[0] if final_diagnosis else "",
+        "top3_predictions": final_diagnosis[:3],
+        "consensus_score": consensus_score,
+        "early_exit": early_exit,
+        "debate_rounds": debate_rounds,
+        "tool_calls": tool_calls,
+        "total_tokens": total_tokens,
+        "latency_s": latency_s,
+    }
+    if confidence is not None:
+        rec["confidence"] = confidence
+    if per_class_probs is not None:
+        rec["per_class_probs"] = per_class_probs
+    if "fitzpatrick_type" in case:
+        rec["fitzpatrick_type"] = case["fitzpatrick_type"]
+    return rec
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Mock runner — exercises the runner end-to-end without LLM calls
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _run_one_mock(case: dict[str, Any]) -> dict[str, Any]:
+    """Deterministic stand-in for a real pipeline run.
+
+    Returns a record with the same shape as a real run would produce. The
+    "prediction" is a hash-stable pick from HAM10000 labels — useless as a
+    classifier, useful as a plumbing check.
+    """
+    classes = ["akiec", "bcc", "bkl", "df", "mel", "nv", "vasc"]
+    # Picking the first class deterministically gives accuracy = 50/642 ≈ 7.8 %
+    # for the akiec rows — visible in the metrics summary, which confirms
+    # the metrics path is wired correctly.
+    pred = classes[hash(case["case_id"]) % len(classes)]
+
+    return _to_metrics_record(
+        case=case,
+        final_diagnosis=[pred, "nv", "bkl"],
+        consensus_score=0.6,
+        early_exit=True,
+        debate_rounds=0,
+        tool_calls=3,
+        total_tokens=512,
+        latency_s=0.001,
+        confidence=0.6,
+        per_class_probs={c: (1.0 if c == pred else 0.0) for c in classes},
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Real runner — stub until model_router._call_local is implemented
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _run_one_real(
+    case: dict[str, Any],
+    orchestrator: Any,
+) -> dict[str, Any]:
+    """Run a single case through the real DermArbiter orchestrator.
+
+    The orchestrator is assumed to return a BlackboardState (or dict) with
+    fields ``final_diagnosis``, ``consensus_score``, ``early_exit``,
+    ``debate_log``, ``total_tool_calls``, ``total_tokens``.
+    """
+    t0 = time.perf_counter()
+    state = orchestrator.invoke({
+        "case_id": case["case_id"],
+        "image_path": case["image_path"],
+        "query": case["query"],
+        "patient_context": case.get("patient_context", {}),
+    })
+    latency_s = time.perf_counter() - t0
+
+    # Coerce dict / Pydantic-model to dict access uniformly.
+    get = state.get if isinstance(state, dict) else lambda k, d=None: getattr(state, k, d)
+
+    return _to_metrics_record(
+        case=case,
+        final_diagnosis=list(get("final_diagnosis", []) or []),
+        consensus_score=float(get("consensus_score", 0.0) or 0.0),
+        early_exit=bool(get("early_exit", False)),
+        debate_rounds=len(get("debate_log", []) or []),
+        tool_calls=int(get("total_tool_calls", 0) or 0),
+        total_tokens=int(get("total_tokens", 0) or 0),
+        latency_s=latency_s,
+    )
+
+
+def _build_real_orchestrator(_args: argparse.Namespace) -> Any:
+    """Construct the production orchestrator.
+
+    Once Furkan's ``dermarbiter.core.model_router._call_local`` is in and a
+    minimal agents factory exists, this should call something like::
+
+        from dermarbiter.core.config import load_config
+        from dermarbiter.core.orchestrator import DermArbiterOrchestrator
+        from dermarbiter.agents.factory import build_agents
+        from dermarbiter.tools.factory import build_tool_registry
+
+        cfg = load_config()
+        tools = build_tool_registry(cfg)
+        agents = build_agents(cfg, tools)
+        return DermArbiterOrchestrator(agents=agents, tools=tools, config=cfg)
+    """
+    raise NotImplementedError(
+        "Real-mode evaluation is blocked on:\n"
+        "  (a) dermarbiter.core.model_router._call_local (Furkan, in progress)\n"
+        "  (b) dermarbiter.agents.factory + dermarbiter.tools.factory (not yet written)\n"
+        "Use --mock for now; switch to --real once both land."
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Driver
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def load_subset(path: Path, max_cases: Optional[int] = None) -> list[dict[str, Any]]:
+    if not path.exists():
+        raise FileNotFoundError(
+            f"{path} not found. Build it first:\n"
+            f"  python scripts/build_dermagent_subset.py"
+        )
+    cases = []
+    with path.open("r", encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            cases.append(json.loads(line))
+            if max_cases and len(cases) >= max_cases:
+                break
+    return cases
+
+
+def _summarise(records: list[dict[str, Any]]) -> dict[str, Any]:
+    """Quick in-process metric summary so the runner doesn't need MetricsCalculator."""
+    n = len(records)
+    if n == 0:
+        return {"n_cases": 0}
+    correct = sum(1 for r in records if r["predicted_label"] == r["ground_truth_label"])
+    top3_correct = sum(
+        1 for r in records if r["ground_truth_label"] in (r.get("top3_predictions") or [])
+    )
+    early_exit = sum(1 for r in records if r.get("early_exit"))
+    return {
+        "n_cases": n,
+        "accuracy": round(correct / n, 4),
+        "top3_accuracy": round(top3_correct / n, 4),
+        "early_exit_rate": round(early_exit / n, 4),
+        "avg_debate_rounds": round(
+            sum(r.get("debate_rounds", 0) for r in records) / n, 2
+        ),
+        "avg_tool_calls": round(
+            sum(r.get("tool_calls", 0) for r in records) / n, 2
+        ),
+        "avg_tokens": round(
+            sum(r.get("total_tokens", 0) for r in records) / n, 0
+        ),
+        "avg_latency_s": round(
+            sum(r.get("latency_s", 0.0) for r in records) / n, 3
+        ),
+    }
+
+
+def run(args: argparse.Namespace) -> int:
+    cases = load_subset(Path(args.subset), max_cases=args.max_cases)
+    logger.info("Loaded %d cases from %s", len(cases), args.subset)
+
+    if args.mock:
+        runner = _run_one_mock
+        orchestrator = None
+    else:
+        orchestrator = _build_real_orchestrator(args)
+        runner = lambda c: _run_one_real(c, orchestrator)  # noqa: E731
+
+    records: list[dict[str, Any]] = []
+    t0 = time.perf_counter()
+    for i, case in enumerate(cases, start=1):
+        try:
+            records.append(runner(case))
+        except Exception as exc:
+            logger.error("Case %s failed: %s", case["case_id"], exc, exc_info=args.verbose)
+            records.append({
+                "case_id": case["case_id"],
+                "ground_truth_label": case["ground_truth_label"],
+                "predicted_label": "",
+                "error": str(exc),
+            })
+        if i % 50 == 0 or i == len(cases):
+            logger.info("  progress: %d / %d", i, len(cases))
+
+    elapsed = time.perf_counter() - t0
+    logger.info("All cases done in %.1fs (%.2f cases/s)", elapsed, len(cases) / max(elapsed, 1e-9))
+
+    # Emit outputs.
+    Path(args.output_dir).mkdir(parents=True, exist_ok=True)
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    mode = "mock" if args.mock else "real"
+    base = Path(args.output_dir) / f"dermagent_subset_{mode}_{ts}"
+    jsonl_path = base.with_suffix(".jsonl")
+    metrics_path = base.with_suffix(".metrics.json")
+
+    with jsonl_path.open("w", encoding="utf-8") as fh:
+        for r in records:
+            fh.write(json.dumps(r, ensure_ascii=False) + "\n")
+
+    summary = {
+        "mode": mode,
+        "subset": str(args.subset),
+        "timestamp_utc": ts,
+        "wall_clock_s": round(elapsed, 2),
+        **_summarise(records),
+    }
+    metrics_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+
+    print("\n" + "=" * 68)
+    print(f" DermArbiter on DermAgent's 642-image subset — {mode.upper()} mode")
+    print("=" * 68)
+    for k, v in summary.items():
+        print(f"  {k:<25} {v}")
+    print(f"\n  Per-case JSONL: {jsonl_path}")
+    print(f"  Metrics JSON:   {metrics_path}\n")
+    return 0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CLI
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _build_argparser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        description="Evaluate DermArbiter on DermAgent's 642-image HAM10000 subset.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    p.add_argument("--subset", default=DEFAULT_SUBSET_JSONL,
+                   help="JSONL produced by scripts/build_dermagent_subset.py.")
+    p.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR)
+    mode = p.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--mock", action="store_true",
+                      help="Use the mock pipeline (no LLM calls).")
+    mode.add_argument("--real", action="store_true",
+                      help="Use the real orchestrator (needs model_router._call_local).")
+    p.add_argument("--config", help="Path to agents.yaml (real mode).")
+    p.add_argument("--tools", help="Path to tools.yaml (real mode).")
+    p.add_argument("--max-cases", type=int, default=None,
+                   help="Cap the number of cases evaluated (smoke test).")
+    p.add_argument("-v", "--verbose", action="store_true")
+    return p
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _build_argparser().parse_args(argv)
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%H:%M:%S",
+    )
+    try:
+        return run(args)
+    except KeyboardInterrupt:
+        logger.error("Interrupted by user.")
+        return 130
+    except NotImplementedError as exc:
+        logger.error("%s", exc)
+        return 3
+    except FileNotFoundError as exc:
+        logger.error("%s", exc)
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

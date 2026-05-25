@@ -92,7 +92,7 @@ class MedGemmaVQA(BaseTool):
             return
 
         import torch
-        from transformers import AutoModelForCausalLM, AutoProcessor
+        from transformers import AutoProcessor
 
         self._device = self._resolve_device()
         hf_token = os.environ.get("HF_TOKEN")
@@ -129,10 +129,30 @@ class MedGemmaVQA(BaseTool):
             token=hf_token,
         )
 
-        self._model = AutoModelForCausalLM.from_pretrained(
-            self._model_id,
-            **load_kwargs,
-        )
+        # MedGemma-4B-it is a multimodal model (image + text → text). With
+        # AutoModelForCausalLM the image branch is silently ignored, so the
+        # model runs but returns an empty answer ("0 chars" in validation).
+        # Try the image-text-to-text class first, then Vision2Seq, then fall
+        # back to CausalLM for any text-only checkpoint variant.
+        last_err: Exception | None = None
+        self._model = None
+        for AutoClsName in ("AutoModelForImageTextToText",
+                            "AutoModelForVision2Seq",
+                            "AutoModelForCausalLM"):
+            try:
+                import transformers as _t
+                AutoCls = getattr(_t, AutoClsName)
+                self._model = AutoCls.from_pretrained(self._model_id, **load_kwargs)
+                logger.info("Loaded MedGemma-4B via %s", AutoClsName)
+                break
+            except (AttributeError, ValueError) as e:
+                last_err = e
+                continue
+        if self._model is None:
+            raise RuntimeError(
+                f"Could not load {self._model_id} with any AutoModel class. "
+                f"Last error: {last_err}"
+            )
         self._model.eval()
         self._loaded = True
 

@@ -193,6 +193,31 @@ class TestMetricsCalculator:
         expected = (5 + 3 + 7 + 2 + 8 + 3) / 6
         assert calculator.avg_tool_calls() == pytest.approx(expected)
 
+    def test_latency_p50(self, calculator):
+        # sorted latencies: 150, 180, 210, 340, 580, 620 → median = (210+340)/2 = 275
+        assert calculator.latency_p50() == pytest.approx(275.0)
+
+    def test_latency_p95(self, calculator):
+        # numpy default linear interp; should sit close to the 95th percentile
+        p95 = calculator.latency_p95()
+        assert 600.0 <= p95 <= 620.0
+
+    def test_throughput_cases_per_min(self, calculator):
+        avg = calculator.avg_latency_ms()
+        assert calculator.throughput_cases_per_min() == pytest.approx(60_000.0 / avg)
+
+    def test_throughput_empty(self):
+        calc = MetricsCalculator(records=[])
+        assert calc.throughput_cases_per_min() == 0.0
+
+    def test_avg_cost_usd_scales_with_token_price(self, calculator):
+        toks = calculator.avg_tokens()
+        # default price = 0.00015 USD / 1k
+        expected = (toks / 1000.0) * 0.00015
+        assert calculator.avg_cost_usd() == pytest.approx(expected)
+        # Override price → linear scaling
+        assert calculator.avg_cost_usd(cost_per_1k_tokens=0.0003) == pytest.approx(2 * expected)
+
     def test_delta_accuracy(self, calculator):
         da = calculator.delta_accuracy(group_key="fitzpatrick_type")
         assert "per_group" in da

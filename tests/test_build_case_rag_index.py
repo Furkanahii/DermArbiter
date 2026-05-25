@@ -159,9 +159,196 @@ class TestLoadLocalManifest:
 
 
 class TestLoadDerm1m:
-    def test_raises_not_implemented(self):
-        with pytest.raises(NotImplementedError):
-            ci.load_derm1m_manifest()
+    """Derm1M loader uses HF snapshot_download — we monkeypatch it so the
+    tests stay network-free and never touch the user's HF token.
+    """
+
+    def _write_manifest(self, root: Path, rows: list[dict]) -> Path:
+        import csv as _csv
+
+        path = root / "Derm1M_v2_pretrain.csv"
+        with path.open("w", newline="", encoding="utf-8") as fh:
+            writer = _csv.DictWriter(fh, fieldnames=list(rows[0].keys()))
+            writer.writeheader()
+            writer.writerows(rows)
+        return path
+
+    def test_raises_without_hf_token(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("HF_TOKEN", raising=False)
+        monkeypatch.delenv("HUGGINGFACE_HUB_TOKEN", raising=False)
+        with pytest.raises(SystemExit, match="HF_TOKEN"):
+            ci.load_derm1m_manifest(data_dir=tmp_path)
+
+    def test_loads_manifest_and_emits_entries(self, tmp_path, monkeypatch):
+        # Pretend the snapshot is already on disk — point the fake download
+        # at the test fixture directory and skip the real HF call.
+        rows = [
+            {"filename": "a.jpg", "disease_label": "Melanoma",
+             "truncated_caption": "...", "source": "pubmed"},
+            {"filename": "b.jpg", "disease_label": "Nevus",
+             "truncated_caption": "...", "source": "atlas"},
+            {"filename": "c.jpg", "disease_label": "Melanoma",
+             "truncated_caption": "...", "source": "pubmed"},
+            {"filename": "", "disease_label": "Acne",
+             "truncated_caption": "x", "source": "x"},   # skipped: no filename
+        ]
+        self._write_manifest(tmp_path, rows)
+        for name in ("a.jpg", "b.jpg", "c.jpg"):
+            (tmp_path / name).write_bytes(b"\xff\xd8\xff\xe0")  # tiny JPEG header
+
+        monkeypatch.setenv("HF_TOKEN", "test-token-not-real")
+        monkeypatch.setattr(ci, "_download_derm1m",
+                            lambda data_dir, hf_token=None, allow_patterns=None: data_dir)
+
+        entries = ci.load_derm1m_manifest(data_dir=tmp_path, max_cases=None)
+        assert len(entries) == 3
+        assert {e.case_id for e in entries} == {"a", "b", "c"}
+        # Diagnosis is lower-cased to match the rest of the pipeline.
+        assert {e.diagnosis for e in entries} == {"melanoma", "nevus"}
+        # Source is namespaced so we can tell Derm1M apart from HAM10000.
+        assert all(e.source.startswith("Derm1M:") for e in entries)
+
+    def test_max_cases_uses_stratified_sample(self, tmp_path, monkeypatch):
+        rows = []
+        # 30 melanomas, 10 nevi → with max_cases=10 expect ≈7-8 mel + 2-3 nv.
+        for i in range(30):
+            rows.append({"filename": f"m{i}.jpg", "disease_label": "Melanoma",
+                         "truncated_caption": "", "source": "x"})
+        for i in range(10):
+            rows.append({"filename": f"n{i}.jpg", "disease_label": "Nevus",
+                         "truncated_caption": "", "source": "x"})
+        self._write_manifest(tmp_path, rows)
+        for r in rows:
+            (tmp_path / r["filename"]).write_bytes(b"\xff\xd8\xff\xe0")
+
+        monkeypatch.setenv("HF_TOKEN", "test-token-not-real")
+        monkeypatch.setattr(ci, "_download_derm1m",
+                            lambda data_dir, hf_token=None, allow_patterns=None: data_dir)
+
+        entries = ci.load_derm1m_manifest(data_dir=tmp_path, max_cases=10, seed=0)
+        assert len(entries) == 10
+        diag_counts = {}
+        for e in entries:
+            diag_counts[e.diagnosis] = diag_counts.get(e.diagnosis, 0) + 1
+        # Stratification: melanoma class should dominate but nevus must appear.
+        assert diag_counts.get("melanoma", 0) >= 6
+        assert diag_counts.get("nevus", 0) >= 1
+
+    def test_handles_utf8_bom_in_manifest(self, tmp_path, monkeypatch):
+        """Published Derm1M CSV ships with a UTF-8 BOM — must not break parsing."""
+        # Write the manifest with an explicit BOM at the head, the way the
+        # published file does. csv.DictReader will surface "﻿filename" instead
+        # of "filename" unless we open the file with utf-8-sig.
+        path = tmp_path / "Derm1M_v2_pretrain.csv"
+        header = "﻿filename,disease_label,source\n"
+        body = "x.jpg,Melanoma,pubmed\ny.jpg,Nevus,atlas\n"
+        path.write_text(header + body, encoding="utf-8")
+        for name in ("x.jpg", "y.jpg"):
+            (tmp_path / name).write_bytes(b"\xff\xd8\xff\xe0")
+
+        monkeypatch.setenv("HF_TOKEN", "test-token-not-real")
+        monkeypatch.setattr(ci, "_download_derm1m",
+                            lambda data_dir, hf_token=None, allow_patterns=None: data_dir)
+
+        entries = ci.load_derm1m_manifest(data_dir=tmp_path, max_cases=None)
+        assert len(entries) == 2
+        assert {e.case_id for e in entries} == {"x", "y"}
+
+    def test_metadata_fields_mapped_and_cleaned(self, tmp_path, monkeypatch):
+        """Body location / age / gender flow through to CaseEntry; the
+        'No <thing> information' sentinel collapses to empty string."""
+        rows = [
+            {"filename": "a.jpg", "disease_label": "Acne",
+             "source": "atlas", "body_location": "face",
+             "age": "23", "gender": "female"},
+            {"filename": "b.jpg", "disease_label": "Eczema",
+             "source": "atlas", "body_location": "No body location information",
+             "age": "No age information", "gender": "No gender information"},
+        ]
+        self._write_manifest(tmp_path, rows)
+        for r in rows:
+            (tmp_path / r["filename"]).write_bytes(b"\xff\xd8\xff\xe0")
+
+        monkeypatch.setenv("HF_TOKEN", "test-token-not-real")
+        monkeypatch.setattr(ci, "_download_derm1m",
+                            lambda data_dir, hf_token=None, allow_patterns=None: data_dir)
+
+        entries = ci.load_derm1m_manifest(data_dir=tmp_path, max_cases=None)
+        by_case = {e.case_id: e for e in entries}
+        assert by_case["a"].location == "face"
+        assert by_case["a"].age == "23"
+        assert by_case["a"].sex == "female"
+        # Sentinel values get collapsed to empty so retrieval metadata stays clean.
+        assert by_case["b"].location == ""
+        assert by_case["b"].age == ""
+        assert by_case["b"].sex == ""
+
+    def test_zip_prefixed_filenames_trigger_zip_fetch(self, tmp_path, monkeypatch):
+        """Derm1M's real manifest stores ``IIYI/0_1.png`` — images live inside
+        per-source ``IIYI.zip`` archives, not as loose PNGs at the repo root.
+        Confirm the loader routes to the zip-extraction path and not to the
+        (broken) ``allow_patterns=[filename, …]`` snapshot call.
+        """
+        rows = [
+            {"filename": "IIYI/0_1.png", "disease_label": "Melanoma", "source": "IIYI"},
+            {"filename": "IIYI/0_2.png", "disease_label": "Nevus", "source": "IIYI"},
+            {"filename": "pubmed/x.png", "disease_label": "Acne", "source": "pubmed"},
+        ]
+        self._write_manifest(tmp_path, rows)
+        # Pre-stage the extracted files so the entry loader's existence check
+        # passes once the fake fetcher "extracts" them.
+        for r in rows:
+            (tmp_path / r["filename"]).parent.mkdir(parents=True, exist_ok=True)
+            (tmp_path / r["filename"]).write_bytes(b"\xff\xd8\xff\xe0")
+
+        monkeypatch.setenv("HF_TOKEN", "test-token-not-real")
+        monkeypatch.setattr(ci, "_download_derm1m",
+                            lambda data_dir, hf_token=None, allow_patterns=None: data_dir)
+
+        calls: list[dict[str, set[str]]] = []
+        def _fake_zip_fetch(data_dir, needed_by_zip, *, hf_token=None, delete_zip_after=True):
+            calls.append({k: set(v) for k, v in needed_by_zip.items()})
+            return sum(len(v) for v in needed_by_zip.values())
+        monkeypatch.setattr(ci, "_fetch_derm1m_image_zips", _fake_zip_fetch)
+
+        entries = ci.load_derm1m_manifest(data_dir=tmp_path, max_cases=None)
+
+        assert len(entries) == 3
+        assert len(calls) == 1
+        assert calls[0]["IIYI.zip"] == {"IIYI/0_1.png", "IIYI/0_2.png"}
+        assert calls[0]["pubmed.zip"] == {"pubmed/x.png"}
+
+
+class TestStratifiedSampler:
+    def test_proportional_split(self):
+        rows = (
+            [{"disease_label": "a"}] * 80
+            + [{"disease_label": "b"}] * 20
+        )
+        sub = ci._stratified_sample(rows, 10, seed=0)
+        counts = {}
+        for r in sub:
+            counts[r["disease_label"]] = counts.get(r["disease_label"], 0) + 1
+        assert sum(counts.values()) == 10
+        # 80:20 → roughly 8:2
+        assert counts.get("a", 0) == 8
+        assert counts.get("b", 0) == 2
+
+    def test_returns_all_when_n_exceeds_population(self):
+        rows = [{"disease_label": "a"}] * 5
+        sub = ci._stratified_sample(rows, 50)
+        assert len(sub) == 5
+
+    def test_handles_missing_stratify_key(self):
+        rows = [{"other": "x"} for _ in range(10)]
+        sub = ci._stratified_sample(rows, 4, seed=0)
+        assert len(sub) == 4
+
+    def test_deterministic_under_same_seed(self):
+        rows = [{"disease_label": ("a" if i % 2 == 0 else "b"), "i": i} for i in range(20)]
+        s1 = ci._stratified_sample(rows, 6, seed=42)
+        s2 = ci._stratified_sample(rows, 6, seed=42)
+        assert [r["i"] for r in s1] == [r["i"] for r in s2]
 
 
 # ─────────────────────────────────────────────────────────────────────────────

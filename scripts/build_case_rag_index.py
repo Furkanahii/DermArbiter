@@ -46,6 +46,7 @@ import argparse
 import csv
 import json
 import logging
+import os
 import sys
 import time
 from dataclasses import dataclass, field
@@ -251,17 +252,315 @@ def load_local_manifest(manifest_path: Path) -> list[CaseEntry]:
     return entries
 
 
-def load_derm1m_manifest(*_args, **_kwargs) -> list[CaseEntry]:
-    """Placeholder for the official Derm1M ingest.
+DERM1M_REPO_ID = "redlessone/Derm1M"
+DERM1M_DEFAULT_SPLIT = "pretrain"
+DERM1M_DEFAULT_DATA_DIR = "data/derm1m"
 
-    To enable: fetch the dataset from Hugging Face (gated), iterate every
-    sample, and emit CaseEntry rows pointing at the locally-cached images.
-    Left unimplemented because Derm1M is gated and ingest cost is non-trivial.
+
+def _download_derm1m(
+    data_dir: Path,
+    hf_token: Optional[str] = None,
+    allow_patterns: Optional[list[str]] = None,
+) -> Path:
+    """Snapshot-download Derm1M from HF Hub (gated). Returns the local cache root.
+
+    The dataset ships as raw image folders + CSV manifests; ``snapshot_download``
+    resumes interrupted runs and respects ``allow_patterns`` so callers can pull
+    just the manifest for a dry-run before committing to the full image pull.
     """
-    raise NotImplementedError(
-        "Derm1M ingest is not yet implemented. Use --source ham10000 as the "
-        "reference base, or extend load_derm1m_manifest()."
+    from huggingface_hub import snapshot_download
+
+    token = hf_token or os.environ.get("HF_TOKEN") or os.environ.get(
+        "HUGGINGFACE_HUB_TOKEN"
     )
+    if token is None:
+        raise SystemExit(
+            "Derm1M is a gated dataset. Set HF_TOKEN (or HUGGINGFACE_HUB_TOKEN) "
+            "in the environment, or pass --hf-token. Make sure you accepted "
+            "the usage agreement at https://huggingface.co/datasets/redlessone/Derm1M"
+        )
+
+    data_dir.mkdir(parents=True, exist_ok=True)
+    logger.info(
+        "Downloading Derm1M (%s) → %s%s",
+        DERM1M_REPO_ID,
+        data_dir,
+        f" filtered to {allow_patterns}" if allow_patterns else " (full snapshot)",
+    )
+    local_root = snapshot_download(
+        repo_id=DERM1M_REPO_ID,
+        repo_type="dataset",
+        local_dir=str(data_dir),
+        token=token,
+        allow_patterns=allow_patterns,
+    )
+    return Path(local_root)
+
+
+def _fetch_derm1m_image_zips(
+    data_dir: Path,
+    needed_by_zip: dict[str, set[str]],
+    *,
+    hf_token: Optional[str] = None,
+    delete_zip_after: bool = True,
+) -> int:
+    """Download Derm1M per-source zip archives and extract only needed members.
+
+    ``needed_by_zip`` maps ``"IIYI.zip" -> {"IIYI/0_1.png", "IIYI/0_2.png"}``.
+    Zips can be huge (youtube.zip ≈ 16 GB) so we delete each archive once its
+    referenced members are unpacked — the loop is resumable because already-
+    extracted files on disk are skipped.
+    """
+    import zipfile
+    from huggingface_hub import hf_hub_download
+
+    token = hf_token or os.environ.get("HF_TOKEN") or os.environ.get(
+        "HUGGINGFACE_HUB_TOKEN"
+    )
+    if token is None:
+        raise SystemExit(
+            "Derm1M is a gated dataset. Set HF_TOKEN (or HUGGINGFACE_HUB_TOKEN) "
+            "in the environment, or pass --hf-token."
+        )
+
+    data_dir.mkdir(parents=True, exist_ok=True)
+    extracted_total = 0
+
+    for zip_name in sorted(needed_by_zip):
+        needed_paths = needed_by_zip[zip_name]
+
+        # Skip if every member is already on disk (resume support).
+        if all((data_dir / p).exists() for p in needed_paths):
+            logger.info(
+                "%s: %d members already on disk, skipping download.",
+                zip_name, len(needed_paths),
+            )
+            extracted_total += len(needed_paths)
+            continue
+
+        logger.info(
+            "Fetching %s (%d members needed)…", zip_name, len(needed_paths),
+        )
+        zip_local = hf_hub_download(
+            repo_id=DERM1M_REPO_ID,
+            repo_type="dataset",
+            filename=zip_name,
+            local_dir=str(data_dir),
+            token=token,
+        )
+        zip_path = Path(zip_local)
+
+        extracted_here = 0
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            members = set(zf.namelist())
+            for needed in needed_paths:
+                target = data_dir / needed
+                if target.exists():
+                    extracted_here += 1
+                    continue
+                # The manifest path is "<source>/<file>" but the zip may store
+                # entries either with or without that prefix. Try both.
+                flat = needed.split("/", 1)[1] if "/" in needed else needed
+                member = needed if needed in members else (flat if flat in members else None)
+                if member is None:
+                    continue
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with zf.open(member) as src, target.open("wb") as dst:
+                    dst.write(src.read())
+                extracted_here += 1
+
+        logger.info(
+            "%s: extracted %d/%d members.",
+            zip_name, extracted_here, len(needed_paths),
+        )
+        extracted_total += extracted_here
+
+        if delete_zip_after:
+            try:
+                zip_path.unlink()
+                logger.info("Deleted %s to reclaim disk.", zip_path.name)
+            except OSError as exc:
+                logger.warning("Could not delete %s: %s", zip_path, exc)
+
+    return extracted_total
+
+
+def _stratified_sample(
+    rows: list[dict[str, str]],
+    n: int,
+    *,
+    stratify_by: str = "disease_label",
+    seed: int = 42,
+) -> list[dict[str, str]]:
+    """Class-stratified sample of size n from rows.
+
+    Falls back to a plain shuffle if no stratification key is found.
+    """
+    import random
+    from collections import defaultdict
+
+    rng = random.Random(seed)
+    if not rows or n >= len(rows):
+        return list(rows)
+
+    buckets: dict[str, list[dict[str, str]]] = defaultdict(list)
+    for r in rows:
+        buckets[(r.get(stratify_by) or "unknown").strip().lower()].append(r)
+
+    # Allocate per-bucket quota proportional to bucket size, min 1.
+    total = len(rows)
+    quotas: dict[str, int] = {}
+    remainders: list[tuple[str, float]] = []
+    used = 0
+    for label, bucket in buckets.items():
+        exact = n * len(bucket) / total
+        quotas[label] = int(exact)
+        remainders.append((label, exact - int(exact)))
+        used += quotas[label]
+    # Distribute the remaining quota by largest remainder
+    for label, _ in sorted(remainders, key=lambda x: -x[1]):
+        if used >= n:
+            break
+        if quotas[label] < len(buckets[label]):
+            quotas[label] += 1
+            used += 1
+
+    sampled: list[dict[str, str]] = []
+    for label, q in quotas.items():
+        bucket = buckets[label]
+        rng.shuffle(bucket)
+        sampled.extend(bucket[:q])
+    rng.shuffle(sampled)
+    return sampled
+
+
+def load_derm1m_manifest(
+    data_dir: Path | str = DERM1M_DEFAULT_DATA_DIR,
+    split: str = DERM1M_DEFAULT_SPLIT,
+    max_cases: Optional[int] = None,
+    stratify_by: str = "disease_label",
+    hf_token: Optional[str] = None,
+    download_images: bool = True,
+    seed: int = 42,
+) -> list[CaseEntry]:
+    """Build CaseEntry list from the gated Derm1M HF dataset.
+
+    Args:
+        data_dir: Local cache root for the HF snapshot.
+        split: Either ``pretrain`` (≈1.0M pairs / ≈400K imgs) or ``validation``.
+        max_cases: When set, take a stratified subset of this size (per
+            ``stratify_by``) instead of the full split. Recommended for first
+            ingest runs to fit Colab free-tier quotas.
+        stratify_by: Manifest column used for stratified sampling.
+        hf_token: Override for the HF auth token (env-based by default).
+        download_images: When False, only the manifest CSV is fetched (used
+            for dry-run / manifest sanity checks).
+        seed: RNG seed for reproducible stratified sampling.
+    """
+    data_dir = Path(data_dir)
+    manifest_name = (
+        "Derm1M_v2_pretrain.csv"
+        if split == "pretrain"
+        else "Derm1M_v2_validation.csv"
+    )
+
+    # First pull just the manifest (cheap) so we can decide what image
+    # patterns to allow on the full snapshot.
+    _download_derm1m(
+        data_dir,
+        hf_token=hf_token,
+        allow_patterns=[manifest_name, "ontology.json"],
+    )
+    manifest_path = data_dir / manifest_name
+    if not manifest_path.exists():
+        raise FileNotFoundError(
+            f"Derm1M manifest {manifest_path} not found after HF snapshot. "
+            "Double-check the split name and your gated-access agreement."
+        )
+
+    # utf-8-sig strips the BOM that ships at the head of the published CSVs;
+    # without it the first column key becomes "﻿filename" and every row
+    # silently fails the `filename` lookup.
+    with manifest_path.open("r", encoding="utf-8-sig") as fh:
+        rows = list(csv.DictReader(fh))
+    logger.info("Derm1M %s manifest: %d rows", split, len(rows))
+
+    def _pick(row: dict[str, str], *keys: str) -> str:
+        """First non-empty value across alternate column names (BOM-safe)."""
+        for k in keys:
+            if k in row and (row[k] or "").strip():
+                return row[k].strip()
+        # Fallback: tolerate stray BOMs we somehow missed.
+        for k in keys:
+            bom_key = "﻿" + k
+            if bom_key in row and (row[bom_key] or "").strip():
+                return row[bom_key].strip()
+        return ""
+
+    # "No <thing> information" is Derm1M's sentinel for missing values — treat
+    # as empty so it doesn't pollute downstream retrieval / metadata.
+    def _clean(value: str) -> str:
+        v = (value or "").strip()
+        if not v or v.lower().startswith("no ") and "information" in v.lower():
+            return ""
+        return v
+
+    if max_cases is not None and max_cases < len(rows):
+        rows = _stratified_sample(rows, max_cases, stratify_by=stratify_by, seed=seed)
+        logger.info("Stratified subset → %d rows (by %s)", len(rows), stratify_by)
+
+    if download_images:
+        # Derm1M ships its images inside per-source zip archives (IIYI.zip,
+        # edu.zip, youtube.zip, …) — not as loose PNGs at the repo root. Pass
+        # individual filenames to `allow_patterns` and you download nothing
+        # but the manifest. Group needed paths by zip and fetch+extract.
+        from collections import defaultdict
+
+        needed_files = sorted({_pick(r, "filename") for r in rows if _pick(r, "filename")})
+        by_zip: dict[str, set[str]] = defaultdict(set)
+        flat_only: list[str] = []
+        for fn in needed_files:
+            if "/" in fn:
+                zip_name = fn.split("/", 1)[0] + ".zip"
+                by_zip[zip_name].add(fn)
+            else:
+                flat_only.append(fn)
+
+        if by_zip:
+            _fetch_derm1m_image_zips(data_dir, by_zip, hf_token=hf_token)
+        if flat_only:
+            # Fallback for layouts (or fixtures) where images live as loose
+            # files at the repo root.
+            _download_derm1m(data_dir, hf_token=hf_token, allow_patterns=flat_only)
+
+    entries: list[CaseEntry] = []
+    missing = 0
+    for row in rows:
+        filename = _pick(row, "filename")
+        diagnosis = _pick(row, "disease_label").lower()
+        if not filename or not diagnosis:
+            continue
+        img = data_dir / filename
+        if download_images and not img.exists():
+            missing += 1
+            continue
+        entries.append(CaseEntry(
+            case_id=Path(filename).stem,
+            image_path=img,
+            diagnosis=diagnosis,
+            location=_clean(_pick(row, "body_location")),
+            age=_clean(_pick(row, "age")),
+            sex=_clean(_pick(row, "gender", "sex")),
+            source=f"Derm1M:{_pick(row, 'source')}",
+        ))
+    if missing:
+        logger.warning(
+            "Derm1M: %d/%d images missing on disk (likely HF allow_patterns mismatch).",
+            missing,
+            len(rows),
+        )
+    logger.info("Loaded %d Derm1M entries (split=%s).", len(entries), split)
+    return entries
 
 
 SOURCE_LOADERS = {
@@ -435,12 +734,26 @@ def _build_argparser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--data-dir",
-        default="data/ham10000",
-        help="HAM10000 data directory (for --source ham10000).",
+        default=None,
+        help=(
+            "Source data directory. Defaults: data/ham10000 for ham10000, "
+            "data/derm1m for derm1m."
+        ),
     )
     p.add_argument(
         "--manifest",
         help="Path to a CSV/JSONL manifest (for --source local).",
+    )
+    p.add_argument(
+        "--derm1m-split",
+        choices=["pretrain", "validation"],
+        default=DERM1M_DEFAULT_SPLIT,
+        help="Derm1M split to ingest (default: pretrain).",
+    )
+    p.add_argument(
+        "--derm1m-stratify-by",
+        default="disease_label",
+        help="Column used for stratified sampling when --max-cases is set.",
     )
     p.add_argument("--persist-dir", default=DEFAULT_CHROMA_DIR)
     p.add_argument("--collection", default=DEFAULT_COLLECTION)
@@ -472,13 +785,21 @@ def _build_argparser() -> argparse.ArgumentParser:
 
 def _load_entries(args: argparse.Namespace) -> list[CaseEntry]:
     if args.source == "ham10000":
-        return load_ham10000_manifest(Path(args.data_dir))
+        data_dir = Path(args.data_dir or "data/ham10000")
+        return load_ham10000_manifest(data_dir)
     if args.source == "local":
         if not args.manifest:
             raise SystemExit("--manifest is required for --source local")
         return load_local_manifest(Path(args.manifest))
     if args.source == "derm1m":
-        return load_derm1m_manifest()
+        data_dir = Path(args.data_dir or DERM1M_DEFAULT_DATA_DIR)
+        return load_derm1m_manifest(
+            data_dir=data_dir,
+            split=args.derm1m_split,
+            max_cases=args.max_cases,
+            stratify_by=args.derm1m_stratify_by,
+            download_images=not args.dry_run,
+        )
     raise SystemExit(f"Unknown source: {args.source}")
 
 

@@ -7,9 +7,15 @@ Reads JSONL results produced by ``BenchmarkRunner`` and computes:
     • Efficiency: early-exit rate, avg debate rounds, avg tokens, avg latency
     • Confusion matrix (as dict)
 
+.. note::
+    For extended metrics (AUROC, balanced accuracy, sensitivity,
+    specificity, delta accuracy), use
+    ``dermarbiter.evaluation.metrics.MetricsCalculator`` directly.
+    This module provides a lightweight pure-Python fallback.
+
 Usage::
 
-    python -m dermarbiter.experiments.analyze \
+    python -m dermarbiter.experiments.analyze \\
         --results results/run_001.jsonl
 """
 
@@ -24,6 +30,12 @@ from collections import Counter, defaultdict
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+try:
+    from dermarbiter.evaluation.metrics import MetricsCalculator as _MetricsCalculator
+    _HAS_EVALUATION = True
+except ImportError:
+    _HAS_EVALUATION = False
 
 
 # ---------------------------------------------------------------------------
@@ -260,6 +272,18 @@ class ResultsAnalyzer:
         if not self._records:
             return 0.0
         return sum(r.get("latency_ms", 0.0) for r in self._records) / len(self._records)
+
+    # ----- Extended metrics bridge ------------------------------------------
+
+    def compute_all_extended(self) -> dict:
+        """Compute extended metrics using evaluation.metrics if available.
+
+        Falls back to the built-in pure-Python metrics otherwise.
+        """
+        if _HAS_EVALUATION:
+            calc = _MetricsCalculator(self._records)
+            return calc.compute_all()
+        return self.to_dict()
 
     # ----- Aggregation -----------------------------------------------------
 

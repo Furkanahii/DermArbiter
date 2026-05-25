@@ -31,7 +31,7 @@ from typing import Any, Dict, List, Optional
 
 from dermarbiter.core.blackboard import BlackboardState
 from dermarbiter.core.orchestrator import DermArbiterOrchestrator
-from dermarbiter.experiments.runner import BenchmarkRunner, _load_cases
+from dermarbiter.experiments.runner import ExperimentRunner, _load_cases
 from dermarbiter.tools.base_tool import ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -169,7 +169,7 @@ class AblationRunner:
     def _tool_variants(self) -> List[AblationConfig]:
         """Generate one variant per removable tool."""
         # Get tool names from mock registry
-        from tests.mocks.mock_tools import create_mock_registry
+        from dermarbiter.core.mock_factory import create_mock_registry
 
         registry = create_mock_registry()
         tool_names = registry.tool_names
@@ -209,8 +209,7 @@ class AblationRunner:
         cases: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
         """Run a single ablation variant on all cases."""
-        from tests.mocks.mock_agents import create_mock_agents
-        from tests.mocks.mock_tools import create_mock_registry
+        from dermarbiter.core.mock_factory import create_mock_agents, create_mock_registry
 
         agents = create_mock_agents()
         registry = create_mock_registry()

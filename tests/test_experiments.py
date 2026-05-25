@@ -1,7 +1,7 @@
 """Tests for the DermArbiter experiments pipeline.
 
 Covers:
-    • BenchmarkRunner — JSONL loading, mock pipeline execution, output format
+    • ExperimentRunner — JSONL loading, mock pipeline execution, output format
     • ResultsAnalyzer — accuracy, F1, calibration, efficiency metrics
     • AblationRunner  — config parsing and variant generation
 """
@@ -16,7 +16,7 @@ from typing import Any, Dict, List
 
 import pytest
 
-from dermarbiter.experiments.runner import BenchmarkRunner, _load_cases
+from dermarbiter.experiments.runner import ExperimentRunner, _load_cases
 from dermarbiter.experiments.analyze import ResultsAnalyzer, _compute_f1, _compute_ece, _compute_brier
 from dermarbiter.experiments.ablation import (
     AblationConfig,
@@ -98,12 +98,12 @@ def _sample_results() -> List[Dict[str, Any]]:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# BenchmarkRunner Tests
+# ExperimentRunner Tests
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-class TestBenchmarkRunner:
-    """Tests for BenchmarkRunner with mock agents."""
+class TestExperimentRunner:
+    """Tests for ExperimentRunner with mock agents."""
 
     def test_load_cases_from_sample_file(self):
         """_load_cases should parse the shipped sample_cases.jsonl correctly."""
@@ -120,7 +120,7 @@ class TestBenchmarkRunner:
     def test_run_mock_pipeline_produces_results(self, tmp_path):
         """Full mock pipeline run should produce one result per input case."""
         output = str(tmp_path / "results.jsonl")
-        runner = BenchmarkRunner(
+        runner = ExperimentRunner(
             config_path=str(_CONFIG_DIR),
             data_path=str(_SAMPLE_DATA),
             output_path=output,
@@ -148,7 +148,7 @@ class TestBenchmarkRunner:
     def test_run_mock_pipeline_result_fields(self, tmp_path):
         """Each result should contain all expected telemetry fields."""
         output = str(tmp_path / "results.jsonl")
-        runner = BenchmarkRunner(
+        runner = ExperimentRunner(
             config_path=str(_CONFIG_DIR),
             data_path=str(_SAMPLE_DATA),
             output_path=output,
@@ -171,7 +171,7 @@ class TestBenchmarkRunner:
     def test_run_mock_pipeline_predicted_not_empty(self, tmp_path):
         """Mock agents should always produce a non-empty predicted diagnosis."""
         output = str(tmp_path / "results.jsonl")
-        runner = BenchmarkRunner(
+        runner = ExperimentRunner(
             config_path=str(_CONFIG_DIR),
             data_path=str(_SAMPLE_DATA),
             output_path=output,

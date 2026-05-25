@@ -297,8 +297,7 @@ class BenchmarkRunner:
             return
 
         if self.mock:
-            from tests.mocks.mock_agents import create_mock_agents
-            from tests.mocks.mock_tools import create_mock_registry
+            from dermarbiter.core.mock_factory import create_mock_agents, create_mock_registry
 
             self._agents = create_mock_agents()
             self._tool_registry = create_mock_registry()

@@ -58,11 +58,15 @@ def _load_cases(path: str, max_cases: Optional[int] = None) -> List[Dict[str, An
 
 
 # ---------------------------------------------------------------------------
-# BenchmarkRunner
+# ExperimentRunner
 # ---------------------------------------------------------------------------
 
-class BenchmarkRunner:
+class ExperimentRunner:
     """Run the full DermArbiter pipeline on a dataset of clinical cases.
+
+    .. note:: Previously named ``BenchmarkRunner``. The alias
+       ``BenchmarkRunner = ExperimentRunner`` is kept for backwards
+       compatibility but new code should use ``ExperimentRunner``.
 
     Args:
         config_path: Path to the YAML config directory (or single file).
@@ -94,8 +98,7 @@ class BenchmarkRunner:
 
     def _setup_mock(self) -> None:
         """Configure mock agents and tools for CPU-only testing."""
-        from tests.mocks.mock_agents import create_mock_agents
-        from tests.mocks.mock_tools import create_mock_registry
+        from dermarbiter.core.mock_factory import create_mock_agents, create_mock_registry
 
         self._agents = create_mock_agents()
         self._tool_registry = create_mock_registry()
@@ -216,6 +219,10 @@ class BenchmarkRunner:
         return results
 
 
+# Backwards compatibility alias
+BenchmarkRunner = ExperimentRunner
+
+
 # ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
@@ -254,7 +261,7 @@ def main() -> None:
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
 
-    runner = BenchmarkRunner(
+    runner = ExperimentRunner(
         config_path=args.config,
         data_path=args.data,
         output_path=args.output,

@@ -220,8 +220,8 @@ class TestFairnessOutput:
 
     def test_has_fitzpatrick(self, tmp_path):
         output = FairnessProbe().run(_create_test_image(tmp_path))
-        assert "fitzpatrick_type" in output.result
-        assert output.result["fitzpatrick_type"] in ("I", "II", "III", "IV", "V", "VI")
+        assert "fitzpatrick_type_approx" in output.result
+        assert output.result["fitzpatrick_type_approx"] in ("I", "II", "III", "IV", "V", "VI")
 
     def test_has_ita(self, tmp_path):
         output = FairnessProbe().run(_create_test_image(tmp_path))
@@ -254,12 +254,12 @@ class TestFairnessOutput:
 
     def test_light_skin_type(self, tmp_path):
         output = FairnessProbe().run(_create_light_image(tmp_path))
-        assert output.result["fitzpatrick_type"] in ("I", "II")
+        assert output.result["fitzpatrick_type_approx"] in ("I", "II")
         assert output.result["bias_warning"] is None
 
     def test_dark_skin_bias_warning(self, tmp_path):
         output = FairnessProbe().run(_create_dark_image(tmp_path))
-        assert output.result["fitzpatrick_type"] in ("V", "VI")
+        assert output.result["fitzpatrick_type_approx"] in ("V", "VI")
         assert output.result["bias_warning"] is not None
 
 

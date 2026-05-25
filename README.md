@@ -270,7 +270,7 @@ If you use DermArbiter in your research or clinical analysis, please cite our up
 ```bibtex
 @article{dermarbiter2026,
   title     = {DermArbiter: Training-Free Multi-LLM Debate for Equitable Dermatological Diagnosis},
-  author    = {Ahi, Furkan and Ayd{\i}n, Mahmut Emre},
+  author    = {Ahi, Furkan and Karaman, Mahmut Emre},
   journal   = {Nature Medicine},
   year      = {2026},
   note      = {Manuscript in preparation}
@@ -281,8 +281,10 @@ If you use DermArbiter in your research or clinical analysis, please cite our up
 
 ## 👥 Authors
 
-- **Furkan Ahi** — Lead Developer & System Architect
-- **Mahmut Emre Aydın** — Evaluation Lead & Co-developer
+Both authors contributed equally to the development and architecture of DermArbiter:
+
+- **Furkan Ahi** — Developer (Core framework design, multi-agent orchestration, LangGraph state-machine, prompt engineering, and configuration layer)
+- **Mahmut Emre Karaman** — Developer (Evaluation metrics, benchmarking harness, clinical dataset preparation, and fairness/uncertainty probes)
 
 ---
 

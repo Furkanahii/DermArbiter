@@ -1,4 +1,4 @@
-<![CDATA[.PHONY: test lint format demo clean install benchmark-mock analyze evaluate fairness validate-tools e2e-mock pipeline-demo
+.PHONY: test lint format demo clean install benchmark-mock analyze evaluate fairness validate-tools e2e-mock pipeline-demo
 
 install:
 	poetry install
@@ -54,4 +54,4 @@ e2e-mock:
 
 pipeline-demo:
 	python notebooks/03_full_pipeline_demo.py
-]]>
+

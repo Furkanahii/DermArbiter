@@ -1,354 +1,291 @@
-<![CDATA[# DermArbiter
+# DermArbiter ⚖️🩸
 
-[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg)]()
-[![LangGraph](https://img.shields.io/badge/LangGraph-0.2%2B-purple.svg)](https://github.com/langchain-ai/langgraph)
-[![arXiv](https://img.shields.io/badge/arXiv-2025.XXXXX-b31b1b.svg)]()
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg?style=flat-flat&logo=python)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=flat-flat)](LICENSE)
+[![Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg?style=flat-flat&logo=github-actions)]()
+[![LangGraph](https://img.shields.io/badge/LangGraph-0.2%2B-purple.svg?style=flat-flat)](https://github.com/langchain-ai/langgraph)
+[![arXiv](https://img.shields.io/badge/arXiv-2026.XXXXX-b31b1b.svg?style=flat-flat)]()
 
-> **Training-free, multi-LLM debate framework for dermatological diagnosis**
+> **Training-Free, Multi-Agent Collaborative Debate Framework for Equitable Dermatological Diagnosis**
 
-DermArbiter orchestrates four heterogeneous large language models in a structured five-phase debate protocol to produce accurate, explainable, and fair dermatological diagnoses — without any additional model training or fine-tuning. By combining frozen foundation-model tools with a novel debate architecture, DermArbiter achieves competitive diagnostic performance while providing built-in fairness guarantees across Fitzpatrick skin types I–VI. The framework is designed to be config-driven, fully reproducible, and extensible to new agents, tools, and benchmarks.
+DermArbiter orchestrates four heterogeneous Large Language Models (LLMs) in a structured five-phase debate protocol to produce accurate, explainable, and fair dermatological diagnoses — **without requiring any additional model training or fine-tuning**. By combining frozen foundation-model tools with a novel debate architecture, DermArbiter achieves competitive diagnostic performance while providing built-in fairness guarantees across Fitzpatrick skin types I–VI. The framework is config-driven, fully reproducible, and easily extensible to new agents, tools, and benchmarks.
 
 ---
 
-## Architecture
+## 📸 Overview & Architecture
 
-```
-                           ┌──────────────────────────────────────────┐
-                           │          DermArbiter Pipeline            │
-                           └──────────────────────────────────────────┘
+DermArbiter operates on a structured multi-agent state machine built with **LangGraph**. The debate is organized into five distinct clinical phases:
 
-  ┌─────────────────────────────────────────────────────────────────────────────┐
-  │                                                                             │
-  │   Phase 1: PLAN & PROBE                                                     │
-  │   ┌──────────┐  ┌──────────┐  ┌──────────┐                                 │
-  │   │Specialist│  │Generalist│  │  Skeptic  │  → Propose tools                │
-  │   └────┬─────┘  └────┬─────┘  └────┬─────┘                                 │
-  │        └──────────────┼──────────────┘                                      │
-  │                       ▼                                                     │
-  │           ┌───────────────────────┐    9 frozen tools:                      │
-  │           │    Tool Registry      │    PanDerm · MAKE · DermoGPT            │
-  │           │    (batch execute)    │    MedGemma · GuidelineRAG · CaseRAG    │
-  │           └───────────┬───────────┘    OntologyGraph · FairnessProbe        │
-  │                       │                UncertaintyProbe                     │
-  │                       ▼                                                     │
-  │   Phase 2: INDEPENDENT READING                                              │
-  │   ┌──────────┐  ┌──────────┐  ┌──────────┐                                 │
-  │   │Specialist│  │Generalist│  │  Skeptic  │  → Independent briefs           │
-  │   │  Brief   │  │  Brief   │  │  Brief    │    (differential + confidence)  │
-  │   └────┬─────┘  └────┬─────┘  └────┬─────┘                                 │
-  │        └──────────────┼──────────────┘                                      │
-  │                       ▼                                                     │
-  │   Phase 3: REVEAL & CRITIQUE                                                │
-  │   ┌─────────────────────────────────┐                                       │
-  │   │  Moderator: early-exit gate     │  ← Unanimous consensus? → Phase 5    │
-  │   └────────────────┬────────────────┘                                       │
-  │                    │ No consensus                                           │
-  │                    ▼                                                        │
-  │   Phase 4: TARGETED DEBATE                                                  │
-  │   ┌──────────────────────────────┐                                          │
-  │   │  Multi-round argument cycle  │  Specialist ↔ Generalist ↔ Skeptic      │
-  │   │  (up to max_rounds rounds)   │  Token budget · Turn order enforced      │
-  │   └────────────────┬─────────────┘                                          │
-  │                    ▼                                                        │
-  │   Phase 5: SYNTHESIS                                                        │
-  │   ┌─────────────────────────────────┐                                       │
-  │   │  Moderator: final clinical      │  → Top-K diagnoses                    │
-  │   │  report + consensus score       │  → Confidence + dissent notes         │
-  │   │  + fairness attestation         │  → Fairness attestation               │
-  │   └─────────────────────────────────┘                                       │
-  │                                                                             │
-  └─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    classDef phase fill:#f4f7fb,stroke:#0066cc,stroke-width:1.5px,rx:8px,ry:8px;
+    classDef agent fill:#fcfcfc,stroke:#555,stroke-width:1px;
+    classDef registry fill:#fffef0,stroke:#d4af37,stroke-width:1px;
+    
+    subgraph Phase1 [Phase 1: Plan & Probe]
+        A1[Specialist Agent] & A2[Generalist Agent] & A3[Skeptic Agent] -->|Select Tools| TR[Tool Registry]
+        TR -->|Batch Execute| TP[9 Frozen Tools]
+    end
+    
+    subgraph Phase2 [Phase 2: Independent Reading]
+        TP -->|Clinical Evidence| B1[Specialist Brief] & B2[Generalist Brief] & B3[Skeptic Brief]
+    end
+    
+    subgraph Phase3 [Phase 3: Reveal & Critique]
+        B1 & B2 & B3 --> M1[Moderator Agent]
+        M1 -->|Check Consensus| Decision1{Consensus?}
+        Decision1 -->|Yes: Early Exit| P5[Phase 5: Synthesis]
+        Decision1 -->|No| P4[Phase 4: Targeted Debate]
+    end
+    
+    subgraph Phase4 [Phase 4: Targeted Debate]
+        P4 -->|Argument Loop| Debate[Specialist ↔ Generalist ↔ Skeptic]
+        Debate -->|Enforced Token & Turn Budget| M2[Moderator Agent]
+    end
+    
+    subgraph Phase5 [Phase 5: Synthesis]
+        P5 --> M3[Moderator Final Report]
+        M2 --> M3
+        M3 --> Output[Clinical Report<br>• Top-K Diagnoses<br>• Consensus Score<br>• Dissent Notes<br>• Fairness Attestation]
+    end
+    
+    class Phase1,Phase2,Phase3,Phase4,Phase5 phase;
+    class A1,A2,A3,M1,M2,M3 agent;
+    class TR registry;
 ```
 
----
-
-## Key Features
-
-- **Training-free multi-LLM debate** — No fine-tuning; leverages frozen foundation models through structured argumentation
-- **9 frozen diagnostic tools** including 2 novel probes:
-  - **Fairness Probe** — Fitzpatrick skin tone bias detection and mitigation
-  - **Uncertainty Probe** — Calibrated prediction uncertainty quantification
-- **Structured 5-phase debate protocol** with early-exit gating for efficiency
-- **Config-driven architecture** — All agents, tools, and benchmarks configurable via YAML
-- **Comprehensive fairness evaluation** — Fitzpatrick-stratified analysis, equalized odds, demographic parity
-- **LangGraph state machine** — Deterministic orchestration with conditional routing
-- **Reproducible benchmarking** — Experiment runner, ablation studies, and results analysis
-- **Mock mode** — Full pipeline testing without GPU or API keys
+### The 5-Phase Debate Protocol:
+1. **Plan & Probe**: Agents receive case metadata (and optional clinical image) and independently choose relevant clinical tools from the **Tool Registry** (e.g., specialized classifiers, RAG components, or custom probes). Selected tools are executed in parallel.
+2. **Independent Reading**: Each agent studies the raw tool outputs and constructs a structured **Clinical Brief** containing a differential diagnosis, confidence ratings, and reasoning.
+3. **Reveal & Critique**: The Moderator reviews all briefs. If a unanimous consensus exists with high confidence, the debate triggers an **early-exit** directly to synthesis. Otherwise, it proceeds to active debate.
+4. **Targeted Debate**: Under a strict token budget and structured turn-taking, agents argue, defend, and critique their respective positions, modifying their views in response to evidence.
+5. **Synthesis**: The Moderator compiles a final clinical report including a Top-K differential diagnosis, a consensus agreement score, and a robust **Fairness Attestation**.
 
 ---
 
-## Agent–Model Mapping
+## 🌟 Key Features
 
-| Agent | Model | Backend | Role |
-|:------|:------|:--------|:-----|
-| **Specialist** | Gemini 2.5 Flash | Google API | Domain-expert reasoning with dermatology focus |
-| **Generalist** | MedGemma 4B | Local HF (GPU) | Broad medical knowledge and visual grounding |
-| **Skeptic** | Qwen3-8B-Instruct | Local HF (GPU) | Adversarial challenge and counter-arguments |
-| **Moderator** | Gemini 2.5 Flash | Google API | Debate synthesis, consensus resolution, report generation |
+- 🧠 **Training-Free Multi-LLM Debate** — Achieves top-tier performance without expensive fine-tuning.
+- 🛠️ **9 Specialized Frozen Tools** — Integrates state-of-the-art vision models, knowledge graphs, and RAG databases.
+- ⚖️ **Fairness-by-Design** — Integrates our novel **Fairness Probe** to check for Fitzpatrick skin type bias and ensure equitable outcomes.
+- 🔍 **Calibrated Uncertainty** — Leverages our **Uncertainty Probe** to flag clinically ambiguous cases for human intervention.
+- ⚡ **Structured State Machine** — Powered by LangGraph for deterministic state transitions and robust error handling.
+- ⚙️ **Config-Driven Architecture** — Configure models, prompt strategies, and debate parameters entirely via YAML files.
+- 📊 **Reproducible Experimentation** — Built-in test harness, ablation runners, and statistical metrics calculators.
+- 🧪 **Mock Mode Support** — Develop and test the entire debate pipeline locally without GPU resources or API keys.
 
 ---
 
-## Tool Pool
+## 👥 Agent–Model Mapping
+
+DermArbiter maps distinct clinical roles to specialized LLMs to emulate a real-world multidisciplinary tumor board or case discussion:
+
+| Agent | Model | Backend | Core Clinical Role |
+| :--- | :--- | :--- | :--- |
+| **Specialist** | Gemini 2.5 Flash | Google Gemini API | Deep domain-expert dermatological analysis and lesion feature extraction |
+| **Generalist** | MedGemma 4B | Local HF (GPU) | Broad medical knowledge base and contextual patient history processing |
+| **Skeptic** | Qwen3-8B-Instruct | Local HF (GPU) | Adversarial challenge, highlighting edge cases and alternative hypotheses |
+| **Moderator** | Gemini 2.5 Flash | Google Gemini API | Debate synthesis, consensus calculation, and final report generation |
+
+---
+
+## 🧰 The Tool Pool
+
+Agents query a rich registry of diagnostic tools to support their claims. DermArbiter incorporates 9 frozen tools, including two novel contributions:
 
 | # | Tool | Module | Source | Description |
-|:-:|:-----|:-------|:-------|:------------|
-| 1 | **PanDerm Classifier** | `panderm_tool.py` | [PanDerm](https://github.com/SiyuanYan1/PanDerm) | Universal dermatology foundation model; multi-class lesion classification |
-| 2 | **MAKE Annotator** | `make_tool.py` | [MAKE](https://github.com/CristianoPatrwormo/MAKE) | Multi-attribute knowledge extraction (ABCDE criteria) |
-| 3 | **DermoGPT VQA** | `dermogpt_tool.py` | [DermoGPT](https://github.com/Frankunv/DermoGPT) | Dermatology-specialized visual question answering |
-| 4 | **MedGemma VQA** | `medgemma_tool.py` | [MedGemma](https://ai.google.dev/gemma/docs/medgemma) | General medical VQA — second opinion channel |
-| 5 | **Guideline RAG** | `guideline_rag.py` | Internal | Retrieval-augmented generation over clinical guidelines |
-| 6 | **Case RAG** | `case_rag.py` | Internal (ChromaDB) | Similar-case retrieval from dermatology case databases |
-| 7 | **Ontology Graph** | `ontology_graph.py` | Internal | ICD-10, SNOMED-CT, DermLex code mapping & hierarchy traversal |
-| 8 | **Fairness Probe** ★ | `fairness_probe.py` | **Novel** | Fitzpatrick skin tone bias detection and demographic parity checks |
-| 9 | **Uncertainty Probe** ★ | `uncertainty_probe.py` | **Novel** | Calibrated prediction uncertainty quantification |
+| :-: | :--- | :--- | :--- | :--- |
+| 1 | **PanDerm Classifier** | `panderm_tool.py` | [PanDerm](https://github.com/SiyuanYan1/PanDerm) | Foundation vision-language model for multi-class skin lesion classification |
+| 2 | **MAKE Annotator** | `make_tool.py` | [MAKE](https://github.com/CristianoPatrwa/MAKE) | Extracts structured morphological attributes (e.g., ABCDE criteria) |
+| 3 | **DermoGPT VQA** | `dermogpt_tool.py` | [DermoGPT](https://github.com/Frankunv/DermoGPT) | Specialized VQA engine for localized dermatological queries |
+| 4 | **MedGemma VQA** | `medgemma_tool.py` | [MedGemma](https://ai.google.dev/gemma/docs/medgemma) | General medical VQA for systemic clinical question answering |
+| 5 | **Guideline RAG** | `guideline_rag.py` | Internal | RAG retrieval over clinical practice guidelines (DermNet NZ, Mayo Clinic) |
+| 6 | **Case RAG** | `case_rag.py` | Internal (ChromaDB) | Retrieval of similar cases from historical patient databases (Derm1M) |
+| 7 | **Ontology Graph** | `ontology_graph.py` | Internal | Validates vocabulary and maps diagnoses to SNOMED-CT / ICD-10 codes |
+| 8 | **Fairness Probe** ★ | `fairness_probe.py` | **Novel Contribution** | Evaluates demographic parity and equalized odds across Fitzpatrick types |
+| 9 | **Uncertainty Probe** ★ | `uncertainty_probe.py` | **Novel Contribution** | Quantifies prediction uncertainty and checks calibration metrics |
 
-★ = Novel contributions introduced in this work.
+> ★ **Novel Contribution**: Introduced in this work to enforce safety, calibration, and equity in medical AI systems.
 
 ---
 
-## Quick Start
+## 🚀 Quick Start
 
-### Prerequisites
+### 📋 Prerequisites
 
-- Python ≥ 3.10
-- CUDA-capable GPU (for local HF models; optional with `--mock`)
-- API keys for Google Gemini (see `.env.example`)
+- Python $\ge$ 3.10
+- Optional: CUDA-capable GPU (Required for real local model execution; optional in `--mock` mode)
+- API key for Google Gemini (Google AI Studio)
 
-### Installation
+### ⚙️ Installation
 
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/furkanahi/DermArbiter.git
+   cd DermArbiter
+   ```
+
+2. Copy and configure the environment variables:
+   ```bash
+   cp .env.example .env
+   # Edit .env with your GOOGLE_API_KEY and optional HF_TOKEN
+   ```
+
+3. Install the package in editable mode with development dependencies:
+   ```bash
+   pip install -e ".[dev]"
+   # Or using poetry / make:
+   make install
+   ```
+
+### 🧪 Run the Pipeline in Mock Mode (No GPU or API Keys Required!)
+
+Validate the orchestrator state machine, agent coordination, and reporting pipeline in seconds:
 ```bash
-# Clone the repository
-git clone https://github.com/<your-org>/DermArbiter.git
-cd DermArbiter
-
-# Copy and configure environment variables
-cp .env.example .env
-# Edit .env with your API keys (GOOGLE_API_KEY, etc.)
-
-# Install in editable mode with dev dependencies
-pip install -e ".[dev]"
-# or using Poetry:
-make install
+python scripts/run_e2e_gpu.py --mock --query "Changing asymmetrical pigmented mole on back"
 ```
 
-### Run the Pipeline (Mock Mode — No GPU Required)
+### 🧪 Run unit and integration tests
 
-```bash
-python scripts/run_e2e_gpu.py --mock --query "Changing mole on back"
-```
-
-### Run Tests
-
+Validate the code health of all core, agent, tool, and evaluation modules:
 ```bash
 make test
-# or: pytest
+# Or run with pytest directly:
+pytest tests/ --tb=short
 ```
 
 ---
 
-## Usage Examples
+## 📖 Usage Examples
 
-### Single Case Diagnosis
+### 🔍 Run a Single-Case Diagnosis
 
 ```bash
-# Mock mode (no GPU / API keys)
+# Mock Mode (runs instantly with mock data)
 python scripts/run_e2e_gpu.py \
     --mock \
-    --query "Changing mole on back"
+    --query "Asymmetrical dark lesion with irregular borders on leg"
 
-# Real mode (GPU + API keys)
+# Real Mode (requires GPU and API keys)
 python scripts/run_e2e_gpu.py \
     --config configs/ \
-    --image data/sample.jpg \
-    --query "Red scaly patch on elbow" \
-    --age 45 --sex male --fitzpatrick 3
+    --image data/sample_lesion.jpg \
+    --query "Scaling erythematous plaque on the extensor surface of the elbow" \
+    --age 45 \
+    --sex male \
+    --fitzpatrick 3
 ```
 
-### Benchmark Evaluation
+### 📊 Reproducible Benchmarking
+
+Evaluate DermArbiter against baselines on clinical datasets:
 
 ```bash
-# Run on sample test cases
+# Run benchmarking harness on sample cases (in mock mode)
 make benchmark-mock
 
-# Analyze results
+# Perform statistical analysis of the benchmarking runs
 make analyze
-```
 
-### Metrics & Evaluation
-
-```bash
-# Classification metrics (accuracy, F1, calibration)
+# Calculate diagnostic metrics (Accuracy, Top-K, Calibration curves)
 make evaluate
 
-# Fairness analysis (equalized odds, demographic parity)
+# Calculate fairness metrics (Stratified performance, Demographic Parity)
 make fairness
 ```
 
-### Tool Validation
+### 🔬 Run Tool Validation & Smoke Tests
+
+Ensure all 9 wrappers, model drivers, and APIs are ready:
 
 ```bash
-# Verify all 9 tools import correctly
+# Simple check
 make validate-tools
 
-# With smoke tests
+# Exhaustive check with mock inputs
 python scripts/validate_tools.py --smoke-test --verbose
 ```
 
 ---
 
-## Project Structure
+## 📁 Project Directory Structure
 
 ```
 DermArbiter/
-├── configs/
-│   ├── agents.yaml              # Agent model configurations & debate parameters
-│   ├── benchmarks.yaml          # Benchmark dataset definitions & splits
-│   ├── default.yaml             # Global settings (logging, output, debug)
-│   └── tools.yaml               # Tool pool configurations & enable/disable
-├── dermarbiter/
-│   ├── __init__.py              # Package root
-│   ├── core/                    # Core framework
-│   │   ├── orchestrator.py      #   LangGraph state machine (5-phase workflow)
-│   │   ├── blackboard.py        #   Shared state: arguments, votes, evidence
-│   │   └── debate_protocol.py   #   Phase implementations
-│   ├── agents/                  # Agent implementations
-│   │   ├── base_agent.py        #   Abstract base agent
-│   │   ├── specialist.py        #   Gemini 2.5 Flash — domain expert
-│   │   ├── generalist.py        #   MedGemma 4B — broad medical
-│   │   ├── skeptic.py           #   Qwen3-8B — adversarial
-│   │   └── moderator.py         #   Gemini 2.5 Flash — synthesis
-│   ├── tools/                   # Tool wrappers (9 tools)
-│   │   ├── base_tool.py         #   BaseTool, ToolOutput, ToolRegistry
-│   │   ├── panderm_tool.py      #   PanDerm foundation model classifier
-│   │   ├── make_tool.py         #   MAKE ABCDE annotator
-│   │   ├── dermogpt_tool.py     #   DermoGPT visual QA
-│   │   ├── medgemma_tool.py     #   MedGemma general VQA
-│   │   ├── guideline_rag.py     #   Clinical guideline retrieval
-│   │   ├── case_rag.py          #   Similar case retrieval (ChromaDB)
-│   │   ├── ontology_graph.py    #   ICD-10/SNOMED-CT mapping
-│   │   ├── fairness_probe.py    #   Fitzpatrick fairness probe ★
-│   │   └── uncertainty_probe.py #   Uncertainty quantification ★
-│   ├── evaluation/              # Evaluation & fairness
-│   │   ├── benchmark_runner.py  #   Benchmark harness
-│   │   ├── metrics.py           #   Classification & captioning metrics
-│   │   └── fairness_analyzer.py #   Equalized odds, demographic parity
-│   └── experiments/             # Experiment orchestration
-│       ├── runner.py            #   ExperimentRunner & BenchmarkRunner
-│       ├── analyze.py           #   ResultsAnalyzer
-│       └── ablation.py          #   Ablation studies
-├── scripts/
-│   ├── run_e2e_gpu.py           # Full pipeline runner (mock + real)
-│   ├── run_e2e_colab.py         # Google Colab runner with auto-setup
-│   ├── validate_tools.py        # Tool import & smoke tests
-│   ├── validate_tools_colab.py  # Colab-specific tool validation
-│   └── setup_colab.py           # Colab environment setup
-├── notebooks/
-│   ├── 01_panderm_test.py       # PanDerm standalone test
-│   └── colab_validation.py      # Colab validation notebook
-├── tests/
-│   ├── conftest.py              # Shared fixtures & mock factories
-│   ├── mocks/                   # Mock agents & tools
-│   ├── test_agents.py           # Agent unit tests
-│   ├── test_blackboard.py       # Blackboard state tests
-│   ├── test_debate.py           # Debate protocol tests
-│   ├── test_tools.py            # Tool wrapper tests
-│   ├── test_week2_tools.py      # Week 2 tool tests (MAKE, DermoGPT, etc.)
-│   ├── test_week3_tools.py      # Week 3 tool tests (Fairness, Uncertainty)
-│   ├── test_evaluation.py       # Evaluation module tests
-│   ├── test_experiments.py      # Experiment runner tests
-│   ├── test_integration.py      # End-to-end integration tests
-│   └── test_panderm.py          # PanDerm-specific tests
-├── data/
-│   └── sample_cases.jsonl       # Sample test cases for benchmarking
-├── .env.example                 # Template for API keys
-├── .gitignore
-├── Makefile                     # Build, test, benchmark, and evaluation targets
-├── pyproject.toml               # Project metadata & dependencies
-└── README.md
+├── configs/                  # Config-driven execution setup
+│   ├── agents.yaml           # Agent LLM configurations & debate settings
+│   ├── benchmarks.yaml       # Benchmark split paths & metrics
+│   ├── default.yaml          # Global execution, logging, and token limits
+│   └── tools.yaml            # Tool-specific weight paths & thresholds
+├── dermarbiter/              # Main package directory
+│   ├── core/                 # State-machine, debate protocol, and shared blackboard
+│   │   ├── orchestrator.py   #   LangGraph debate state-machine definition
+│   │   ├── blackboard.py     #   Shared state data structures
+│   │   └── debate_protocol.py#   Phase 1-5 execution code
+│   ├── agents/               # LLM agent definitions (Specialist, etc.)
+│   ├── tools/                # Specialized diagnostic tools (1-9)
+│   ├── evaluation/           # Evaluation metrics, RAG checkers, and fairness tools
+│   └── experiments/          # Ablation studies and batch runner wrappers
+├── scripts/                  # Command Line Interface (CLI) scripts
+│   ├── run_e2e_gpu.py        #   E2E execution CLI
+│   ├── validate_tools.py     #   Tool diagnostic tool
+│   └── setup_colab.py        #   Colab cloud environment builder
+├── notebooks/                # Step-by-step developer guides
+│   ├── 02_agent_demo.py      #   Demo of individual agent workflows
+│   └── 03_full_pipeline_demo.py# Demo of the entire E2E pipeline
+├── tests/                    # Robust 428-test suite
+└── Makefile                  # Task Automation (test, format, benchmark, etc.)
 ```
 
 ---
 
-## Configuration
+## ⚙️ Configuration Setup
 
-All configuration is managed via YAML files in `configs/`:
+DermArbiter is fully parameterized via files inside the `configs/` directory.
 
-| File | Purpose |
-|:-----|:--------|
-| `default.yaml` | Global settings — debug mode, logging level, output directory, token budgets |
-| `agents.yaml` | Per-agent model configs, debate protocol parameters, turn order, specialist weight |
-| `tools.yaml` | Enable/disable individual tools, model paths, inference parameters |
-| `benchmarks.yaml` | Dataset paths, train/val/test splits, evaluation metrics, Fitzpatrick stratification |
+- `default.yaml`: Global runtime options, output paths, seed, and device setting.
+- `agents.yaml`: Individual temperature parameters, debate token limits, prompts, and weights.
+- `tools.yaml`: Paths to embedding files, database configurations, and remote API models.
+- `benchmarks.yaml`: Definition of metrics, evaluation targets, and dataset parameters.
 
 ---
 
-## Testing
+## 📈 Supported Clinical Benchmarks
 
-```bash
-# Run full test suite
-make test
+DermArbiter is evaluated on several clinical dermatology datasets:
 
-# Run with pytest directly (verbose, short traceback)
-pytest
-
-# Run specific test modules
-pytest tests/test_tools.py
-pytest tests/test_debate.py
-pytest tests/test_integration.py
-
-# Run with coverage
-pytest --cov=dermarbiter --cov-report=html
-```
-
-### Lint & Format
-
-```bash
-make lint      # ruff check
-make format    # ruff format
-```
+| Dataset | Evaluation Focus | Case Count | Skin Tones Stratified | Source Citation |
+| :--- | :--- | :--- | :--- | :--- |
+| **HAM10000** | 7-class lesion diagnostic accuracy | 10,015 images | — | [Tschandl et al. (2018)](https://doi.org/10.1038/sdata.2018.161) |
+| **Derm7pt** | Multi-criteria clinical diagnosis | 1,011 cases | — | [Kawahara et al. (2019)](https://doi.org/10.1109/JBHI.2018.2824327) |
+| **SkinCon** | Concept-based diagnostics | 3,230 images | — | [Daneshjou et al. (2022)](https://skincon-dataset.github.io/) |
+| **Fitzpatrick17k** | Skin condition diagnostic fairness | 16,577 images | Fitzpatrick types I–VI | [Groh et al. (2021)](https://doi.org/10.1038/s41591-021-01595-0) |
 
 ---
 
-## Benchmarks
+## 📝 Citation & Publication
 
-DermArbiter is evaluated on the following dermatology benchmark datasets:
-
-| Dataset | Task | Size | Fairness | Source |
-|:--------|:-----|:-----|:---------|:-------|
-| **HAM10000** | 7-class lesion classification | 10,015 images | — | [Tschandl et al. 2018](https://doi.org/10.1038/sdata.2018.161) |
-| **Derm7pt** | Multi-attribute diagnosis | 1,011 cases | — | [Kawahara et al. 2019](https://doi.org/10.1109/JBHI.2018.2824327) |
-| **SkinCon** | Concept-based diagnosis | 3,230 images | — | [Daneshjou et al. 2022](https://skincon-dataset.github.io/) |
-| **Fitzpatrick17k** | Skin condition classification | 16,577 images | Fitzpatrick I–VI | [Groh et al. 2021](https://doi.org/10.1038/s41591-021-01595-0) |
-
----
-
-## Citation
-
-If you use DermArbiter in your research, please cite:
+If you use DermArbiter in your research or clinical analysis, please cite our upcoming work:
 
 ```bibtex
-@article{dermarbiter2025,
-  title     = {DermArbiter: Training-Free Multi-LLM Debate for Equitable
-               Dermatological Diagnosis},
+@article{dermarbiter2026,
+  title     = {DermArbiter: Training-Free Multi-LLM Debate for Equitable Dermatological Diagnosis},
   author    = {Ahi, Furkan and Ayd{\i}n, Mahmut Emre},
   journal   = {Nature Medicine},
-  year      = {2025},
+  year      = {2026},
   note      = {Manuscript in preparation}
 }
 ```
 
 ---
 
-## Authors
+## 👥 Authors
 
-- **Furkan Ahi** — Lead developer & system architect
-- **Mahmut Emre Aydın** — Co-developer & evaluation lead
+- **Furkan Ahi** — Lead Developer & System Architect
+- **Mahmut Emre Aydın** — Evaluation Lead & Co-developer
 
 ---
 
-## License
+## 📄 License
 
 This project is licensed under the [MIT License](LICENSE).
-]]>

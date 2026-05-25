@@ -8,14 +8,17 @@ analysis for dermatological diagnosis evaluation:
 - Uncertainty calibration analysis
 """
 
+from dermarbiter.evaluation.ablation import AblationAnalyzer, VariantStats
 from dermarbiter.evaluation.benchmark_runner import BenchmarkRunner, DatasetLoader
 from dermarbiter.evaluation.fairness_analyzer import FairnessAnalyzer, GroupMetrics
 from dermarbiter.evaluation.metrics import MetricsCalculator
 
 __all__ = [
+    "AblationAnalyzer",
     "BenchmarkRunner",
     "DatasetLoader",
     "FairnessAnalyzer",
     "GroupMetrics",
     "MetricsCalculator",
+    "VariantStats",
 ]

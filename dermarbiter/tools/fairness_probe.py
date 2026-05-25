@@ -20,10 +20,12 @@ import logging
 import math
 import time
 from pathlib import Path
-
-import numpy as np
+from typing import TYPE_CHECKING
 
 from dermarbiter.tools.base_tool import BaseTool, ToolOutput
+
+if TYPE_CHECKING:
+    import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -91,13 +93,14 @@ class FairnessProbe(BaseTool):
         path = Path(image_path)
         return path.exists() and path.suffix.lower() in SUPPORTED_EXTENSIONS
 
-    def _extract_skin_region(self, image_path: str) -> np.ndarray:
+    def _extract_skin_region(self, image_path: str) -> "np.ndarray":
         """Extract border pixels as a proxy for surrounding skin.
 
         Applies IQR-based outlier filtering to remove artifacts such as
         dermoscope vignette (dark borders), ruler markings, air bubbles,
         and hair that could bias the ITA estimate.
         """
+        import numpy as np
         from PIL import Image
 
         img = Image.open(image_path).convert("RGB")
@@ -131,11 +134,13 @@ class FairnessProbe(BaseTool):
             return pixels
         return filtered
 
-    def _compute_ita(self, rgb_pixels: np.ndarray) -> tuple[float, list[int]]:
+    def _compute_ita(self, rgb_pixels: "np.ndarray") -> tuple[float, list[int]]:
         """Compute ITA angle from RGB pixel array.
 
         Uses pure-numpy sRGB → XYZ → CIELab conversion (no skimage).
         """
+        import numpy as np
+
         # Mean RGB of skin region
         mean_rgb = rgb_pixels.mean(axis=0).astype(np.float64)
         skin_rgb = [int(c) for c in mean_rgb.round()]
@@ -171,7 +176,7 @@ class FairnessProbe(BaseTool):
 
         return round(ita, 1), skin_rgb, round(l_star, 2), round(a_star, 2), round(b_star, 2)
 
-    def _estimate_confidence(self, rgb_pixels: np.ndarray) -> float:
+    def _estimate_confidence(self, rgb_pixels: "np.ndarray") -> float:
         """Estimate confidence based on colour variance in skin region.
 
         Low variance → high confidence (uniform skin colour).

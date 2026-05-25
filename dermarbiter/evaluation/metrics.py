@@ -432,6 +432,42 @@ class MetricsCalculator:
             return 0.0
         return sum(r.get("total_tool_calls", 0) for r in self._records) / len(self._records)
 
+    def latency_percentile(self, q: float) -> float:
+        """Empirical latency percentile (q ∈ [0, 100])."""
+        latencies = [
+            float(r.get("latency_ms", 0.0)) for r in self._records
+            if r.get("latency_ms") is not None
+        ]
+        if not latencies:
+            return 0.0
+        return float(np.percentile(latencies, q))
+
+    def latency_p50(self) -> float:
+        """Median per-case latency (ms)."""
+        return self.latency_percentile(50)
+
+    def latency_p95(self) -> float:
+        """95th-percentile per-case latency (ms) — tail-latency signal."""
+        return self.latency_percentile(95)
+
+    def throughput_cases_per_min(self) -> float:
+        """Effective throughput assuming sequential execution."""
+        avg = self.avg_latency_ms()
+        return 60_000.0 / avg if avg > 0 else 0.0
+
+    def avg_cost_usd(
+        self,
+        cost_per_1k_tokens: float = 0.00015,
+    ) -> float:
+        """Estimated USD cost per case at a given token price.
+
+        Default 0.00015 USD / 1k tokens ≈ Gemini 2.5 Flash blended input+output.
+        Override for a different model price. Returns 0.0 when token usage is
+        unavailable.
+        """
+        toks = self.avg_tokens()
+        return (toks / 1000.0) * cost_per_1k_tokens
+
     # =====================================================================
     # Aggregation
     # =====================================================================
@@ -469,6 +505,10 @@ class MetricsCalculator:
             "avg_debate_rounds": self.avg_debate_rounds(),
             "avg_tokens": self.avg_tokens(),
             "avg_latency_ms": self.avg_latency_ms(),
+            "latency_p50": self.latency_p50(),
+            "latency_p95": self.latency_p95(),
+            "throughput_cases_per_min": self.throughput_cases_per_min(),
+            "avg_cost_usd": self.avg_cost_usd(),
             "avg_tool_calls": self.avg_tool_calls(),
         }
         if include_fairness:
@@ -510,6 +550,10 @@ class MetricsCalculator:
         print(f"  Avg Tokens:              {d['avg_tokens']:.0f}")
         print(f"  Avg Tool Calls:          {d['avg_tool_calls']:.1f}")
         print(f"  Avg Latency (ms):        {d['avg_latency_ms']:.1f}")
+        print(f"  Latency p50 (ms):        {d['latency_p50']:.1f}")
+        print(f"  Latency p95 (ms):        {d['latency_p95']:.1f}")
+        print(f"  Throughput (cases/min):  {d['throughput_cases_per_min']:.2f}")
+        print(f"  Est. cost / case (USD):  {d['avg_cost_usd']:.5f}")
 
         # Per-class F1
         f1s = d.get("per_class_f1", {})

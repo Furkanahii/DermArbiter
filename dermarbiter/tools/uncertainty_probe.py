@@ -15,12 +15,15 @@ References:
 
 from __future__ import annotations
 
+import json
 import logging
 import time
-
-import numpy as np
+from typing import TYPE_CHECKING
 
 from dermarbiter.tools.base_tool import BaseTool, ToolOutput
+
+if TYPE_CHECKING:
+    import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -63,21 +66,35 @@ class UncertaintyProbe(BaseTool):
         self._loaded = True  # pure computation
 
         # Optional: calibration scores from a held-out set
-        self._calibration_scores: np.ndarray | None = None
+        self._calibration_scores: "np.ndarray | None" = None
+        # Optional: probabilities set via set_probabilities() (BaseTool-safe path)
+        self._probabilities: dict[str, float] | None = None
 
     def _load_model(self) -> None:
         pass  # no model to load
 
     def unload(self) -> None:
         self._calibration_scores = None
+        self._probabilities = None
 
-    def set_calibration_scores(self, scores: np.ndarray) -> None:
+    def set_probabilities(self, probabilities: dict[str, float]) -> None:
+        """Set classification probabilities prior to ``run()``.
+
+        Provided so callers can pass structured probabilities without
+        violating the ``BaseTool.run(image_path, query)`` signature.
+        State is cleared on each call; consumers should set then run.
+        """
+        self._probabilities = dict(probabilities)
+
+    def set_calibration_scores(self, scores: "np.ndarray") -> None:
         """Set non-conformity scores from a calibration dataset.
 
         Args:
             scores: 1-D array of non-conformity scores (e.g. 1 − p_true)
                     computed on a held-out calibration set.
         """
+        import numpy as np
+
         self._calibration_scores = np.sort(scores)
         logger.info(
             "UncertaintyProbe calibration set: %d samples.", len(scores),
@@ -90,19 +107,23 @@ class UncertaintyProbe(BaseTool):
         return True
 
     @staticmethod
-    def compute_entropy(probabilities: np.ndarray) -> float:
+    def compute_entropy(probabilities: "np.ndarray") -> float:
         """Shannon entropy: H = −Σ pᵢ log(pᵢ)."""
+        import numpy as np
+
         probs = probabilities[probabilities > 0]
         return float(-np.sum(probs * np.log(probs)))
 
     @staticmethod
     def compute_max_entropy(num_classes: int) -> float:
         """Maximum entropy for uniform distribution: log(K)."""
+        import numpy as np
+
         return float(np.log(num_classes))
 
     def compute_conformal_set(
         self,
-        probabilities: np.ndarray,
+        probabilities: "np.ndarray",
         class_names: list[str],
     ) -> list[str]:
         """Build conformal prediction set at level 1 − α.
@@ -112,6 +133,8 @@ class UncertaintyProbe(BaseTool):
         Otherwise falls back to Adaptive Prediction Sets (APS): sort by
         descending probability and accumulate until sum ≥ 1 − α.
         """
+        import numpy as np
+
         sorted_idx = np.argsort(-probabilities)
 
         if self._calibration_scores is not None and len(self._calibration_scores) > 0:
@@ -144,8 +167,8 @@ class UncertaintyProbe(BaseTool):
 
     def compute_ece(
         self,
-        confidences: np.ndarray,
-        accuracies: np.ndarray,
+        confidences: "np.ndarray",
+        accuracies: "np.ndarray",
     ) -> float:
         """Expected Calibration Error over binned predictions.
 
@@ -154,6 +177,8 @@ class UncertaintyProbe(BaseTool):
         use entropy and conformal set size instead.  Batch-level ECE
         is also computed by ``dermarbiter.evaluation.metrics.MetricsCalculator``.
         """
+        import numpy as np
+
         n = len(confidences)
         if n == 0:
             return 0.0
@@ -170,42 +195,64 @@ class UncertaintyProbe(BaseTool):
         return round(float(ece), 4)
 
     @staticmethod
-    def compute_gini_impurity(probabilities: np.ndarray) -> float:
+    def compute_gini_impurity(probabilities: "np.ndarray") -> float:
         """Gini impurity: 1 − Σ pᵢ².
 
         Complementary to entropy; ranges from 0 (certain) to
         1−1/K (maximally uncertain for K classes).
         """
+        import numpy as np
+
         return float(1.0 - np.sum(probabilities ** 2))
 
     def _parse_probabilities(
         self, query: str
-    ) -> tuple[np.ndarray, list[str]] | None:
+    ) -> "tuple[np.ndarray, list[str]] | None":
         """Parse probability dict from query string.
 
-        Expects format: ``melanoma:0.62,bcc:0.15,nevus:0.11,...``
+        Accepts either a JSON object (``{"melanoma": 0.62, ...}``) or the
+        compact ``melanoma:0.62,bcc:0.15,...`` format.
         """
-        if not query or ":" not in query:
+        import numpy as np
+
+        if not query:
             return None
 
         class_names: list[str] = []
         probs: list[float] = []
-        for item in query.split(","):
-            item = item.strip()
-            if ":" not in item:
-                continue
-            name, prob_str = item.rsplit(":", 1)
+
+        stripped = query.strip()
+        if stripped.startswith("{") and stripped.endswith("}"):
             try:
-                probs.append(float(prob_str.strip()))
-                class_names.append(name.strip())
-            except ValueError:
-                continue
+                obj = json.loads(stripped)
+            except json.JSONDecodeError:
+                obj = None
+            if isinstance(obj, dict):
+                for name, prob in obj.items():
+                    try:
+                        probs.append(float(prob))
+                        class_names.append(str(name))
+                    except (TypeError, ValueError):
+                        continue
+
+        if not probs:
+            if ":" not in query:
+                return None
+            for item in query.split(","):
+                item = item.strip()
+                if ":" not in item:
+                    continue
+                name, prob_str = item.rsplit(":", 1)
+                try:
+                    probs.append(float(prob_str.strip()))
+                    class_names.append(name.strip())
+                except ValueError:
+                    continue
 
         if not probs:
             return None
 
         arr = np.array(probs, dtype=np.float64)
-        # Normalise if needed
         total = arr.sum()
         if total > 0:
             arr /= total
@@ -215,14 +262,15 @@ class UncertaintyProbe(BaseTool):
         self,
         image_path: str | None = None,
         query: str = "",
-        probabilities: dict[str, float] | None = None,
     ) -> ToolOutput:
+        import numpy as np
+
         t0 = time.perf_counter()
 
-        # Get probabilities from either kwarg or query string
-        if probabilities is not None:
-            class_names = list(probabilities.keys())
-            probs = np.array(list(probabilities.values()), dtype=np.float64)
+        # Get probabilities from setter or query string (in that order)
+        if self._probabilities is not None:
+            class_names = list(self._probabilities.keys())
+            probs = np.array(list(self._probabilities.values()), dtype=np.float64)
             total = probs.sum()
             if total > 0:
                 probs /= total

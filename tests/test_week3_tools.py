@@ -8,6 +8,7 @@ GuidelineRAG require ChromaDB + models, so they are tested with mocks.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -310,6 +311,13 @@ class TestUncertaintyInterface:
         assert "uncertainty_probe" in reg
 
 
+def _run_uncertainty(probs: dict, alpha: float | None = None):
+    """Run UncertaintyProbe via BaseTool-safe setter path."""
+    tool = UncertaintyProbe(alpha=alpha) if alpha is not None else UncertaintyProbe()
+    tool.set_probabilities(probs)
+    return tool.run()
+
+
 class TestUncertaintyOutput:
     """UncertaintyProbe with real computation."""
 
@@ -318,29 +326,29 @@ class TestUncertaintyOutput:
             "melanoma": 0.62, "bcc": 0.15, "nevus": 0.11,
             "scc": 0.06, "sk": 0.03, "df": 0.02, "ak": 0.01,
         }
-        output = UncertaintyProbe().run(probabilities=probs)
+        output = _run_uncertainty(probs)
         assert isinstance(output, ToolOutput)
         assert output.tool_name == "uncertainty_probe"
 
     def test_has_entropy(self):
         probs = {"melanoma": 0.62, "bcc": 0.15, "nevus": 0.11}
-        output = UncertaintyProbe().run(probabilities=probs)
+        output = _run_uncertainty(probs)
         assert "predictive_entropy" in output.result
         assert output.result["predictive_entropy"] > 0
 
     def test_has_max_entropy(self):
         probs = {"melanoma": 0.62, "bcc": 0.15, "nevus": 0.11}
-        output = UncertaintyProbe().run(probabilities=probs)
+        output = _run_uncertainty(probs)
         assert output.result["max_entropy"] > 0
 
     def test_normalised_entropy_range(self):
         probs = {"melanoma": 0.62, "bcc": 0.15, "nevus": 0.11}
-        output = UncertaintyProbe().run(probabilities=probs)
+        output = _run_uncertainty(probs)
         assert 0.0 <= output.result["normalised_entropy"] <= 1.0
 
     def test_conformal_set(self):
         probs = {"melanoma": 0.62, "bcc": 0.15, "nevus": 0.11, "scc": 0.06, "other": 0.06}
-        output = UncertaintyProbe().run(probabilities=probs)
+        output = _run_uncertainty(probs)
         cs = output.result["conformal_set"]
         assert isinstance(cs, list)
         assert len(cs) > 0
@@ -348,22 +356,28 @@ class TestUncertaintyOutput:
 
     def test_coverage_guarantee(self):
         probs = {"a": 0.5, "b": 0.3, "c": 0.2}
-        output = UncertaintyProbe(alpha=0.10).run(probabilities=probs)
+        output = _run_uncertainty(probs, alpha=0.10)
         assert output.result["coverage_guarantee"] == 0.90
 
     def test_high_uncertainty_flag(self):
         # Uniform distribution → high entropy
         probs = {"a": 0.14, "b": 0.14, "c": 0.14, "d": 0.14, "e": 0.14, "f": 0.15, "g": 0.15}
-        output = UncertaintyProbe().run(probabilities=probs)
+        output = _run_uncertainty(probs)
         assert output.result["is_high_uncertainty"] is True
 
     def test_low_uncertainty_flag(self):
         probs = {"melanoma": 0.95, "bcc": 0.05}
-        output = UncertaintyProbe().run(probabilities=probs)
+        output = _run_uncertainty(probs)
         assert output.result["is_high_uncertainty"] is False
 
     def test_from_query_string(self):
         output = UncertaintyProbe().run(query="melanoma:0.62,bcc:0.15,nevus:0.11")
+        assert "predictive_entropy" in output.result
+
+    def test_from_query_json(self):
+        output = UncertaintyProbe().run(
+            query=json.dumps({"melanoma": 0.62, "bcc": 0.15, "nevus": 0.23}),
+        )
         assert "predictive_entropy" in output.result
 
     def test_empty_input_error(self):
@@ -372,18 +386,24 @@ class TestUncertaintyOutput:
 
     def test_confidence_inversely_related(self):
         # Confident: one dominant class
-        confident = UncertaintyProbe().run(probabilities={"a": 0.95, "b": 0.05})
+        confident = _run_uncertainty({"a": 0.95, "b": 0.05})
         # Uncertain: uniform
-        uncertain = UncertaintyProbe().run(
-            probabilities={"a": 0.25, "b": 0.25, "c": 0.25, "d": 0.25},
-        )
+        uncertain = _run_uncertainty({"a": 0.25, "b": 0.25, "c": 0.25, "d": 0.25})
         assert confident.confidence > uncertain.confidence
 
     def test_metadata(self):
         probs = {"a": 0.5, "b": 0.5}
-        output = UncertaintyProbe().run(probabilities=probs)
+        output = _run_uncertainty(probs)
         assert output.metadata["contribution"] == "novel"
         assert output.metadata["method"] == "entropy + split-conformal"
+
+    def test_signature_matches_base_tool(self):
+        """run() must match BaseTool contract: (image_path, query) only."""
+        import inspect
+
+        sig = inspect.signature(UncertaintyProbe().run)
+        params = set(sig.parameters)
+        assert params == {"image_path", "query"}
 
 
 class TestUncertaintyComputation:

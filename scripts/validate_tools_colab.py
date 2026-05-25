@@ -617,18 +617,17 @@ def test_uncertainty_probe() -> ToolTestResult:
 
         tool = UncertaintyProbe(alpha=0.10)
 
-        # Test with realistic probability distribution
-        output = tool.run(
-            probabilities={
-                "melanoma": 0.45,
-                "basal_cell_carcinoma": 0.20,
-                "melanocytic_nevus": 0.15,
-                "seborrheic_keratosis": 0.10,
-                "dermatofibroma": 0.05,
-                "actinic_keratosis": 0.03,
-                "vascular_lesion": 0.02,
-            }
-        )
+        # Test with realistic probability distribution (BaseTool-safe setter path)
+        tool.set_probabilities({
+            "melanoma": 0.45,
+            "basal_cell_carcinoma": 0.20,
+            "melanocytic_nevus": 0.15,
+            "seborrheic_keratosis": 0.10,
+            "dermatofibroma": 0.05,
+            "actinic_keratosis": 0.03,
+            "vascular_lesion": 0.02,
+        })
+        output = tool.run()
         elapsed = (time.perf_counter() - t0) * 1000
 
         result.elapsed_ms = round(elapsed, 1)
@@ -650,10 +649,11 @@ def test_uncertainty_probe() -> ToolTestResult:
             # Test with calibration scores
             cal_scores = np.array([0.1, 0.2, 0.3, 0.15, 0.25, 0.35, 0.4, 0.12, 0.22, 0.28])
             tool.set_calibration_scores(cal_scores)
-            output_cal = tool.run(probabilities={
+            tool.set_probabilities({
                 "melanoma": 0.45, "bcc": 0.20, "nv": 0.15,
                 "sk": 0.10, "df": 0.05, "ak": 0.03, "vasc": 0.02,
             })
+            output_cal = tool.run()
             if output_cal.result.get("conformal_calibrated"):
                 result.notes += " | Calibrated conformal: ✅"
         else:

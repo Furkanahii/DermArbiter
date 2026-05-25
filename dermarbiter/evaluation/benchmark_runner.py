@@ -176,17 +176,27 @@ class DatasetLoader:
 
         import csv
 
+        # The published CSV uses `fitzpatrick_scale` (self-reported) and
+        # `fitzpatrick_centaur` (annotator-verified). Earlier scrapes shipped a
+        # single `fitzpatrick` column. Probe each in order; -1 (unknown) maps
+        # to empty so fairness subgroup analysis can drop these rows.
+        fitz_map = {"1": "I", "2": "II", "3": "III", "4": "IV", "5": "V", "6": "VI"}
+
+        def _resolve_fitz(row: Dict[str, str]) -> str:
+            for key in ("fitzpatrick_scale", "fitzpatrick_centaur", "fitzpatrick"):
+                raw = (row.get(key) or "").strip()
+                if not raw or raw == "-1":
+                    continue
+                return fitz_map.get(raw, raw)
+            return ""
+
         cases: List[Dict[str, Any]] = []
         with open(metadata_path, "r", encoding="utf-8") as fh:
             reader = csv.DictReader(fh)
             for row in reader:
-                hasher = row.get("hasher", row.get("md5hash", ""))
+                hasher = row.get("md5hash", row.get("hasher", ""))
                 image_path = str(data_dir / "images" / f"{hasher}.jpg")
-
-                # Map numeric Fitzpatrick to Roman numeral
-                fitz_raw = row.get("fitzpatrick", "").strip()
-                fitz_map = {"1": "I", "2": "II", "3": "III", "4": "IV", "5": "V", "6": "VI"}
-                fitzpatrick_type = fitz_map.get(fitz_raw, fitz_raw)
+                fitzpatrick_type = _resolve_fitz(row)
 
                 case = {
                     "case_id": hasher,

@@ -283,6 +283,41 @@ class TestLoadDerm1m:
         assert by_case["b"].age == ""
         assert by_case["b"].sex == ""
 
+    def test_zip_prefixed_filenames_trigger_zip_fetch(self, tmp_path, monkeypatch):
+        """Derm1M's real manifest stores ``IIYI/0_1.png`` — images live inside
+        per-source ``IIYI.zip`` archives, not as loose PNGs at the repo root.
+        Confirm the loader routes to the zip-extraction path and not to the
+        (broken) ``allow_patterns=[filename, …]`` snapshot call.
+        """
+        rows = [
+            {"filename": "IIYI/0_1.png", "disease_label": "Melanoma", "source": "IIYI"},
+            {"filename": "IIYI/0_2.png", "disease_label": "Nevus", "source": "IIYI"},
+            {"filename": "pubmed/x.png", "disease_label": "Acne", "source": "pubmed"},
+        ]
+        self._write_manifest(tmp_path, rows)
+        # Pre-stage the extracted files so the entry loader's existence check
+        # passes once the fake fetcher "extracts" them.
+        for r in rows:
+            (tmp_path / r["filename"]).parent.mkdir(parents=True, exist_ok=True)
+            (tmp_path / r["filename"]).write_bytes(b"\xff\xd8\xff\xe0")
+
+        monkeypatch.setenv("HF_TOKEN", "test-token-not-real")
+        monkeypatch.setattr(ci, "_download_derm1m",
+                            lambda data_dir, hf_token=None, allow_patterns=None: data_dir)
+
+        calls: list[dict[str, set[str]]] = []
+        def _fake_zip_fetch(data_dir, needed_by_zip, *, hf_token=None, delete_zip_after=True):
+            calls.append({k: set(v) for k, v in needed_by_zip.items()})
+            return sum(len(v) for v in needed_by_zip.values())
+        monkeypatch.setattr(ci, "_fetch_derm1m_image_zips", _fake_zip_fetch)
+
+        entries = ci.load_derm1m_manifest(data_dir=tmp_path, max_cases=None)
+
+        assert len(entries) == 3
+        assert len(calls) == 1
+        assert calls[0]["IIYI.zip"] == {"IIYI/0_1.png", "IIYI/0_2.png"}
+        assert calls[0]["pubmed.zip"] == {"pubmed/x.png"}
+
 
 class TestStratifiedSampler:
     def test_proportional_split(self):

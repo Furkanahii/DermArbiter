@@ -297,6 +297,94 @@ def _download_derm1m(
     return Path(local_root)
 
 
+def _fetch_derm1m_image_zips(
+    data_dir: Path,
+    needed_by_zip: dict[str, set[str]],
+    *,
+    hf_token: Optional[str] = None,
+    delete_zip_after: bool = True,
+) -> int:
+    """Download Derm1M per-source zip archives and extract only needed members.
+
+    ``needed_by_zip`` maps ``"IIYI.zip" -> {"IIYI/0_1.png", "IIYI/0_2.png"}``.
+    Zips can be huge (youtube.zip ≈ 16 GB) so we delete each archive once its
+    referenced members are unpacked — the loop is resumable because already-
+    extracted files on disk are skipped.
+    """
+    import zipfile
+    from huggingface_hub import hf_hub_download
+
+    token = hf_token or os.environ.get("HF_TOKEN") or os.environ.get(
+        "HUGGINGFACE_HUB_TOKEN"
+    )
+    if token is None:
+        raise SystemExit(
+            "Derm1M is a gated dataset. Set HF_TOKEN (or HUGGINGFACE_HUB_TOKEN) "
+            "in the environment, or pass --hf-token."
+        )
+
+    data_dir.mkdir(parents=True, exist_ok=True)
+    extracted_total = 0
+
+    for zip_name in sorted(needed_by_zip):
+        needed_paths = needed_by_zip[zip_name]
+
+        # Skip if every member is already on disk (resume support).
+        if all((data_dir / p).exists() for p in needed_paths):
+            logger.info(
+                "%s: %d members already on disk, skipping download.",
+                zip_name, len(needed_paths),
+            )
+            extracted_total += len(needed_paths)
+            continue
+
+        logger.info(
+            "Fetching %s (%d members needed)…", zip_name, len(needed_paths),
+        )
+        zip_local = hf_hub_download(
+            repo_id=DERM1M_REPO_ID,
+            repo_type="dataset",
+            filename=zip_name,
+            local_dir=str(data_dir),
+            token=token,
+        )
+        zip_path = Path(zip_local)
+
+        extracted_here = 0
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            members = set(zf.namelist())
+            for needed in needed_paths:
+                target = data_dir / needed
+                if target.exists():
+                    extracted_here += 1
+                    continue
+                # The manifest path is "<source>/<file>" but the zip may store
+                # entries either with or without that prefix. Try both.
+                flat = needed.split("/", 1)[1] if "/" in needed else needed
+                member = needed if needed in members else (flat if flat in members else None)
+                if member is None:
+                    continue
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with zf.open(member) as src, target.open("wb") as dst:
+                    dst.write(src.read())
+                extracted_here += 1
+
+        logger.info(
+            "%s: extracted %d/%d members.",
+            zip_name, extracted_here, len(needed_paths),
+        )
+        extracted_total += extracted_here
+
+        if delete_zip_after:
+            try:
+                zip_path.unlink()
+                logger.info("Deleted %s to reclaim disk.", zip_path.name)
+            except OSError as exc:
+                logger.warning("Could not delete %s: %s", zip_path, exc)
+
+    return extracted_total
+
+
 def _stratified_sample(
     rows: list[dict[str, str]],
     n: int,
@@ -422,12 +510,28 @@ def load_derm1m_manifest(
         logger.info("Stratified subset → %d rows (by %s)", len(rows), stratify_by)
 
     if download_images:
-        # Pull only the image files referenced by the chosen subset to avoid
-        # downloading 80 GB+ when the user just wants 50K.
-        needed = sorted({_pick(r, "filename") for r in rows if _pick(r, "filename")})
-        # HF snapshot_download accepts glob patterns; passing the explicit
-        # filenames keeps the transfer scoped to the subset.
-        _download_derm1m(data_dir, hf_token=hf_token, allow_patterns=needed)
+        # Derm1M ships its images inside per-source zip archives (IIYI.zip,
+        # edu.zip, youtube.zip, …) — not as loose PNGs at the repo root. Pass
+        # individual filenames to `allow_patterns` and you download nothing
+        # but the manifest. Group needed paths by zip and fetch+extract.
+        from collections import defaultdict
+
+        needed_files = sorted({_pick(r, "filename") for r in rows if _pick(r, "filename")})
+        by_zip: dict[str, set[str]] = defaultdict(set)
+        flat_only: list[str] = []
+        for fn in needed_files:
+            if "/" in fn:
+                zip_name = fn.split("/", 1)[0] + ".zip"
+                by_zip[zip_name].add(fn)
+            else:
+                flat_only.append(fn)
+
+        if by_zip:
+            _fetch_derm1m_image_zips(data_dir, by_zip, hf_token=hf_token)
+        if flat_only:
+            # Fallback for layouts (or fixtures) where images live as loose
+            # files at the repo root.
+            _download_derm1m(data_dir, hf_token=hf_token, allow_patterns=flat_only)
 
     entries: list[CaseEntry] = []
     missing = 0

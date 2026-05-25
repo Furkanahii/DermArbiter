@@ -189,20 +189,6 @@ class MedGemmaVQA(BaseTool):
 
     # -- Inference ---------------------------------------------------------
 
-    def _build_chat_prompt(self, query: str, has_image: bool) -> list[dict]:
-        """Build a chat-style prompt for MedGemma."""
-        content: list[dict[str, str]] = []
-
-        if has_image:
-            content.append({"type": "image"})
-
-        content.append({
-            "type": "text",
-            "text": query,
-        })
-
-        return [{"role": "user", "content": content}]
-
     @staticmethod
     def _to_device(inputs: Any, device: Any) -> Any:
         """Safely move processor outputs to device."""
@@ -213,45 +199,52 @@ class MedGemmaVQA(BaseTool):
     def _run_inference(
         self, image_path: str | None, query: str
     ) -> dict[str, Any]:
-        """Run VQA inference with MedGemma-4B."""
+        """Run VQA inference with MedGemma-4B.
+
+        Follows the official HuggingFace pattern for google/medgemma-4b-it
+        (https://huggingface.co/google/medgemma-4b-it). The image MUST be
+        embedded inside the message content dict (``{"type": "image",
+        "image": <PIL>}``) — passing it as a separate ``images=`` kwarg
+        after a tokenised template leaves no slot for the vision encoder
+        and the model silently returns an empty answer.
+        """
         import torch
         from PIL import Image
 
         effective_query = query or DEFAULT_QUERY
         has_image = image_path is not None and Path(image_path).exists()
 
-        messages = self._build_chat_prompt(effective_query, has_image)
-
-        # Apply chat template
-        prompt_text = self._processor.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=True,
-        )
-
-        # Process inputs
+        # Build the multimodal chat message in the form the processor expects.
+        user_content: list[dict[str, Any]] = [
+            {"type": "text", "text": effective_query},
+        ]
         if has_image:
-            image = Image.open(image_path).convert("RGB")
-            inputs = self._processor(
-                text=prompt_text, images=image, return_tensors="pt",
+            user_content.append(
+                {"type": "image", "image": Image.open(image_path).convert("RGB")}
             )
-        else:
-            inputs = self._processor(
-                text=prompt_text, return_tensors="pt",
-            )
+        messages = [{"role": "user", "content": user_content}]
 
+        # Tokenise inline; return_dict=True gives us a BatchEncoding with
+        # input_ids + (when image present) pixel_values already aligned.
+        inputs = self._processor.apply_chat_template(
+            messages,
+            add_generation_prompt=True,
+            tokenize=True,
+            return_dict=True,
+            return_tensors="pt",
+        )
         inputs = self._to_device(inputs, self._model.device)
 
-        # Generate
-        with torch.no_grad():
+        input_len = inputs["input_ids"].shape[-1]
+
+        with torch.inference_mode():
             output_ids = self._model.generate(
                 **inputs,
                 max_new_tokens=self._max_new_tokens,
                 do_sample=False,
             )
 
-        # Decode response only (skip input tokens)
-        input_len = inputs["input_ids"].shape[-1]
+        # Decode just the newly generated tokens.
         answer = self._processor.decode(
             output_ids[0][input_len:],
             skip_special_tokens=True,

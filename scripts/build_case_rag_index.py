@@ -390,9 +390,32 @@ def load_derm1m_manifest(
             "Double-check the split name and your gated-access agreement."
         )
 
-    with manifest_path.open("r", encoding="utf-8") as fh:
+    # utf-8-sig strips the BOM that ships at the head of the published CSVs;
+    # without it the first column key becomes "﻿filename" and every row
+    # silently fails the `filename` lookup.
+    with manifest_path.open("r", encoding="utf-8-sig") as fh:
         rows = list(csv.DictReader(fh))
     logger.info("Derm1M %s manifest: %d rows", split, len(rows))
+
+    def _pick(row: dict[str, str], *keys: str) -> str:
+        """First non-empty value across alternate column names (BOM-safe)."""
+        for k in keys:
+            if k in row and (row[k] or "").strip():
+                return row[k].strip()
+        # Fallback: tolerate stray BOMs we somehow missed.
+        for k in keys:
+            bom_key = "﻿" + k
+            if bom_key in row and (row[bom_key] or "").strip():
+                return row[bom_key].strip()
+        return ""
+
+    # "No <thing> information" is Derm1M's sentinel for missing values — treat
+    # as empty so it doesn't pollute downstream retrieval / metadata.
+    def _clean(value: str) -> str:
+        v = (value or "").strip()
+        if not v or v.lower().startswith("no ") and "information" in v.lower():
+            return ""
+        return v
 
     if max_cases is not None and max_cases < len(rows):
         rows = _stratified_sample(rows, max_cases, stratify_by=stratify_by, seed=seed)
@@ -401,7 +424,7 @@ def load_derm1m_manifest(
     if download_images:
         # Pull only the image files referenced by the chosen subset to avoid
         # downloading 80 GB+ when the user just wants 50K.
-        needed = sorted({r["filename"].strip() for r in rows if r.get("filename")})
+        needed = sorted({_pick(r, "filename") for r in rows if _pick(r, "filename")})
         # HF snapshot_download accepts glob patterns; passing the explicit
         # filenames keeps the transfer scoped to the subset.
         _download_derm1m(data_dir, hf_token=hf_token, allow_patterns=needed)
@@ -409,8 +432,8 @@ def load_derm1m_manifest(
     entries: list[CaseEntry] = []
     missing = 0
     for row in rows:
-        filename = (row.get("filename") or "").strip()
-        diagnosis = (row.get("disease_label") or "").strip().lower()
+        filename = _pick(row, "filename")
+        diagnosis = _pick(row, "disease_label").lower()
         if not filename or not diagnosis:
             continue
         img = data_dir / filename
@@ -421,10 +444,10 @@ def load_derm1m_manifest(
             case_id=Path(filename).stem,
             image_path=img,
             diagnosis=diagnosis,
-            location="",
-            age="",
-            sex="",
-            source=f"Derm1M:{(row.get('source') or '').strip()}",
+            location=_clean(_pick(row, "body_location")),
+            age=_clean(_pick(row, "age")),
+            sex=_clean(_pick(row, "gender", "sex")),
+            source=f"Derm1M:{_pick(row, 'source')}",
         ))
     if missing:
         logger.warning(

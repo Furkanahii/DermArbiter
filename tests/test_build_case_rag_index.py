@@ -234,6 +234,55 @@ class TestLoadDerm1m:
         assert diag_counts.get("melanoma", 0) >= 6
         assert diag_counts.get("nevus", 0) >= 1
 
+    def test_handles_utf8_bom_in_manifest(self, tmp_path, monkeypatch):
+        """Published Derm1M CSV ships with a UTF-8 BOM — must not break parsing."""
+        # Write the manifest with an explicit BOM at the head, the way the
+        # published file does. csv.DictReader will surface "﻿filename" instead
+        # of "filename" unless we open the file with utf-8-sig.
+        path = tmp_path / "Derm1M_v2_pretrain.csv"
+        header = "﻿filename,disease_label,source\n"
+        body = "x.jpg,Melanoma,pubmed\ny.jpg,Nevus,atlas\n"
+        path.write_text(header + body, encoding="utf-8")
+        for name in ("x.jpg", "y.jpg"):
+            (tmp_path / name).write_bytes(b"\xff\xd8\xff\xe0")
+
+        monkeypatch.setenv("HF_TOKEN", "test-token-not-real")
+        monkeypatch.setattr(ci, "_download_derm1m",
+                            lambda data_dir, hf_token=None, allow_patterns=None: data_dir)
+
+        entries = ci.load_derm1m_manifest(data_dir=tmp_path, max_cases=None)
+        assert len(entries) == 2
+        assert {e.case_id for e in entries} == {"x", "y"}
+
+    def test_metadata_fields_mapped_and_cleaned(self, tmp_path, monkeypatch):
+        """Body location / age / gender flow through to CaseEntry; the
+        'No <thing> information' sentinel collapses to empty string."""
+        rows = [
+            {"filename": "a.jpg", "disease_label": "Acne",
+             "source": "atlas", "body_location": "face",
+             "age": "23", "gender": "female"},
+            {"filename": "b.jpg", "disease_label": "Eczema",
+             "source": "atlas", "body_location": "No body location information",
+             "age": "No age information", "gender": "No gender information"},
+        ]
+        self._write_manifest(tmp_path, rows)
+        for r in rows:
+            (tmp_path / r["filename"]).write_bytes(b"\xff\xd8\xff\xe0")
+
+        monkeypatch.setenv("HF_TOKEN", "test-token-not-real")
+        monkeypatch.setattr(ci, "_download_derm1m",
+                            lambda data_dir, hf_token=None, allow_patterns=None: data_dir)
+
+        entries = ci.load_derm1m_manifest(data_dir=tmp_path, max_cases=None)
+        by_case = {e.case_id: e for e in entries}
+        assert by_case["a"].location == "face"
+        assert by_case["a"].age == "23"
+        assert by_case["a"].sex == "female"
+        # Sentinel values get collapsed to empty so retrieval metadata stays clean.
+        assert by_case["b"].location == ""
+        assert by_case["b"].age == ""
+        assert by_case["b"].sex == ""
+
 
 class TestStratifiedSampler:
     def test_proportional_split(self):

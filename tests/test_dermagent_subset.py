@@ -254,16 +254,34 @@ class TestRunnerEnd2End:
         assert summary["n_cases"] == 7
         assert "accuracy" in summary
 
-    def test_real_mode_currently_blocked(self, tmp_path: Path):
+    def test_real_mode_builds_orchestrator(self, tmp_path: Path, monkeypatch):
+        """Real mode now wires up agents + tools via the same path as
+        run_e2e_gpu.py. Stub the orchestrator builder so the test stays
+        offline (no Gemini API, no HF downloads, no GPU).
+        """
         subset = tmp_path / "subset.jsonl"
         _write_subset_jsonl(subset, n=2)
+
+        class _FakeOrch:
+            def invoke(self, case_dict):
+                from types import SimpleNamespace
+                return SimpleNamespace(
+                    final_diagnosis=["mel", "nv", "bkl"],
+                    consensus_score=0.7,
+                    early_exit=True,
+                    debate_log=[],
+                    total_tool_calls=3,
+                    total_tokens=512,
+                )
+
+        monkeypatch.setattr(rds, "_build_real_orchestrator", lambda args: _FakeOrch())
+
         rc = rds.main([
             "--real",
             "--subset", str(subset),
             "--output-dir", str(tmp_path / "results"),
         ])
-        # Returns 3 (NotImplementedError) until factory layer lands.
-        assert rc == 3
+        assert rc == 0
 
     def test_requires_mode_flag(self):
         with pytest.raises(SystemExit):

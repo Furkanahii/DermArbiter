@@ -156,28 +156,102 @@ def _run_one_real(
     )
 
 
-def _build_real_orchestrator(_args: argparse.Namespace) -> Any:
+class _OrchestratorAdapter:
+    """Thin wrapper around DermArbiterOrchestrator that accepts a plain dict
+    per-case and constructs a fresh ``BlackboardState`` before delegating to
+    ``orchestrator.run(state)``. Lets the per-case loop stay agnostic to
+    Pydantic types and keeps heavy model state (the agents + tools, with
+    cached weights) loaded once across all 642 cases.
+    """
+
+    def __init__(self, orchestrator: Any) -> None:
+        self._orch = orchestrator
+
+    def invoke(self, case_dict: dict[str, Any]) -> Any:
+        from dermarbiter.core.blackboard import BlackboardState
+        state = BlackboardState(
+            case_id=case_dict["case_id"],
+            image_path=case_dict.get("image_path"),
+            query=case_dict.get("query", ""),
+            patient_context=case_dict.get("patient_context", {}),
+        )
+        return self._orch.run(state)
+
+
+def _build_real_orchestrator(args: argparse.Namespace) -> Any:
     """Construct the production orchestrator.
 
-    Once Furkan's ``dermarbiter.core.model_router._call_local`` is in and a
-    minimal agents factory exists, this should call something like::
-
-        from dermarbiter.core.config import load_config
-        from dermarbiter.core.orchestrator import DermArbiterOrchestrator
-        from dermarbiter.agents.factory import build_agents
-        from dermarbiter.tools.factory import build_tool_registry
-
-        cfg = load_config()
-        tools = build_tool_registry(cfg)
-        agents = build_agents(cfg, tools)
-        return DermArbiterOrchestrator(agents=agents, tools=tools, config=cfg)
+    Mirrors ``scripts/run_e2e_gpu.py::_build_real_pipeline``: loads the
+    merged YAML config, instantiates ModelRouter, registers all 9 tools,
+    wires up the four agents, and hands them to the LangGraph
+    ``DermArbiterOrchestrator``. Heavy models load lazily on first
+    ``agent.invoke(...)`` call, then stay cached for every subsequent case
+    in the loop — critical when evaluating 642 cases on a T4.
     """
-    raise NotImplementedError(
-        "Real-mode evaluation is blocked on:\n"
-        "  (a) dermarbiter.core.model_router._call_local (Furkan, in progress)\n"
-        "  (b) dermarbiter.agents.factory + dermarbiter.tools.factory (not yet written)\n"
-        "Use --mock for now; switch to --real once both land."
+    from dermarbiter.core.config import load_config, AgentConfig
+    from dermarbiter.core.model_router import ModelRouter
+    from dermarbiter.core.orchestrator import DermArbiterOrchestrator
+    from dermarbiter.tools.base_tool import ToolRegistry
+    from dermarbiter.agents import (
+        SpecialistAgent, GeneralistAgent, SkepticAgent, ModeratorAgent,
     )
+    from dermarbiter.tools import (
+        PanDermClassifier, MAKEAnnotator, DermoGPTVQA, MedGemmaVQA,
+        GuidelineRAG, CaseRAG, OntologyGraph, FairnessProbe, UncertaintyProbe,
+    )
+
+    config_dir = args.config or "configs/"
+    cfg = load_config(config_dir)
+    logger.info("Config loaded from %s (project=%s)", config_dir, cfg.project_name)
+
+    router = ModelRouter(cfg)
+
+    # Fill any missing agent config with sensible Gemini defaults so a
+    # partial agents.yaml doesn't kill the benchmark.
+    agent_configs: dict[str, AgentConfig] = dict(cfg.agents)
+    for role in ("specialist", "generalist", "skeptic", "moderator"):
+        agent_configs.setdefault(role, AgentConfig(
+            role=role,
+            model_backend="google_api",
+            model_name=cfg.default_model,
+            temperature=cfg.default_temperature,
+        ))
+
+    registry = ToolRegistry()
+    registered: list[str] = []
+    for ToolCls in (PanDermClassifier, MAKEAnnotator, DermoGPTVQA, MedGemmaVQA,
+                    GuidelineRAG, CaseRAG, OntologyGraph, FairnessProbe,
+                    UncertaintyProbe):
+        try:
+            registry.register(ToolCls())
+            registered.append(ToolCls.__name__)
+        except Exception as exc:
+            logger.warning("Skipped tool %s: %s", ToolCls.__name__, exc)
+    logger.info("Registered %d/%d tools: %s",
+                len(registered), 9, ", ".join(registered))
+
+    agents = {
+        "specialist": SpecialistAgent(config=agent_configs["specialist"],
+                                       model_router=router,
+                                       tool_registry=registry),
+        "generalist": GeneralistAgent(config=agent_configs["generalist"],
+                                       model_router=router,
+                                       tool_registry=registry),
+        "skeptic":    SkepticAgent(config=agent_configs["skeptic"],
+                                    model_router=router),
+        "moderator":  ModeratorAgent(config=agent_configs["moderator"],
+                                      model_router=router,
+                                      tool_registry=registry),
+    }
+
+    orchestrator = DermArbiterOrchestrator(
+        agents=agents,
+        tool_registry=registry,
+        max_rounds=3,
+        max_tokens_per_turn=100,
+        global_token_budget=50_000,
+    )
+    return _OrchestratorAdapter(orchestrator)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

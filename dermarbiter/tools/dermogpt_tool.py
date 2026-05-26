@@ -97,7 +97,7 @@ class DermoGPTVQA(BaseTool):
             return
 
         import torch
-        from transformers import AutoModelForCausalLM, AutoProcessor
+        from transformers import AutoProcessor
 
         self._device = self._resolve_device()
         hf_token = os.environ.get("HF_TOKEN")
@@ -134,10 +134,34 @@ class DermoGPTVQA(BaseTool):
             token=hf_token,
         )
 
-        self._model = AutoModelForCausalLM.from_pretrained(
-            self._model_id,
-            **load_kwargs,
-        )
+        # DermoGPT-RL is a vision-language model built on Qwen3-VL — must be
+        # loaded via an image-text-to-text AutoModel. AutoModelForCausalLM
+        # does not register Qwen3VLConfig and crashes with
+        # "Unrecognized configuration class Qwen3VLConfig".
+        #
+        # We try the newest API first (transformers ≥ 4.45), fall back to
+        # AutoModelForVision2Seq (4.39+), and finally CausalLM for text-only
+        # variants. ``trust_remote_code=True`` means the model's own python
+        # wrapper takes over when these fail too.
+        last_err: Exception | None = None
+        self._model = None
+        for AutoClsName in ("AutoModelForImageTextToText",
+                            "AutoModelForVision2Seq",
+                            "AutoModelForCausalLM"):
+            try:
+                import transformers as _t
+                AutoCls = getattr(_t, AutoClsName)
+                self._model = AutoCls.from_pretrained(self._model_id, **load_kwargs)
+                logger.info("Loaded DermoGPT-RL via %s", AutoClsName)
+                break
+            except (AttributeError, ValueError) as e:
+                last_err = e
+                continue
+        if self._model is None:
+            raise RuntimeError(
+                f"Could not load {self._model_id} with any AutoModel class. "
+                f"Last error: {last_err}"
+            )
         self._model.eval()
         self._loaded = True
 

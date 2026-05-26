@@ -58,14 +58,29 @@ _HAM10000_LABEL_MAP: dict[str, str] = {
     "melanoma": "mel", "malignant_melanoma": "mel",
     # bkl — benign keratosis-like (seborrheic, solar lentigo, lichen planus)
     "seborrheic_keratosis": "bkl", "seborrheic keratosis": "bkl",
+    "irritated_seborrheic_keratosis": "bkl",
+    "irritated seborrheic keratosis": "bkl",
+    "inflamed_seborrheic_keratosis": "bkl",
+    "inflamed seborrheic keratosis": "bkl",
+    "stucco_keratosis": "bkl", "stucco keratosis": "bkl",
     "solar_lentigo": "bkl", "solar lentigo": "bkl",
-    "lichen_planus_like_keratosis": "bkl", "benign_keratosis": "bkl",
+    "lichen_planus_like_keratosis": "bkl",
+    "lichen planus like keratosis": "bkl",
+    "lichenoid_keratosis": "bkl", "lichenoid keratosis": "bkl",
+    "benign_keratosis": "bkl", "benign keratosis": "bkl",
+    "benign_keratosis_like_lesion": "bkl",
     # bcc — basal cell carcinoma
     "basal_cell_carcinoma": "bcc", "basal cell carcinoma": "bcc",
-    # akiec — actinic keratosis / Bowen
+    # akiec — actinic keratosis / Bowen / SCC-in-situ
     "actinic_keratosis": "akiec", "actinic keratosis": "akiec",
+    "ak": "akiec",
     "squamous_cell_carcinoma_in_situ": "akiec",
-    "intraepithelial_carcinoma": "akiec", "bowen_disease": "akiec",
+    "squamous cell carcinoma in situ": "akiec",
+    "squamous_cell_carcinoma": "akiec",
+    "squamous cell carcinoma": "akiec", "scc": "akiec",
+    "intraepithelial_carcinoma": "akiec",
+    "intraepithelial carcinoma": "akiec",
+    "bowen_disease": "akiec", "bowen disease": "akiec", "bowens": "akiec",
     # df — dermatofibroma
     "dermatofibroma": "df",
     # vasc — vascular

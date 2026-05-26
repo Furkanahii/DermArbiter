@@ -40,6 +40,11 @@ class SkepticAgent(BaseAgent):
         - **Debate style**: Most aggressive of all agents.  Directly
           challenges overconfidence, anchoring bias, and insufficient
           evidence.  Forces the panel to defend its conclusions rigorously.
+
+    The ``challenge_strength`` (``low`` / ``medium`` / ``high``) is read
+    from ``config.extra["challenge_strength"]`` and controls how
+    aggressively the skeptic frames its debate arguments.  Default is
+    ``"high"`` to fulfil the adversarial role.
     """
 
     # ------------------------------------------------------------------
@@ -144,10 +149,16 @@ class SkepticAgent(BaseAgent):
                 if not flags:
                     flags = ["insufficient_critique:auto_generated"]
 
+                # Skeptic confidence is capped at 0.70 by design — the
+                # adversarial role should never express high certainty,
+                # as that would undermine its critical function.
+                raw_conf = parsed.get("confidence", 0.4)
+                skeptic_conf = min(float(raw_conf), 0.70)
+
                 return AgentBrief(
                     agent_role=self.role,
                     top3_differential=parsed["top3_differential"][:5],
-                    confidence=parsed.get("confidence", 0.4),
+                    confidence=skeptic_conf,
                     reasoning=parsed.get("reasoning", ""),
                     cited_cards=cited,
                     disagreement_flags=flags,
@@ -190,6 +201,13 @@ class SkepticAgent(BaseAgent):
         attacks overconfidence, gaps in reasoning, and potential biases
         while demanding stronger evidence for any diagnosis.
 
+        The aggressiveness is modulated by ``challenge_strength``
+        (configurable via ``agents.yaml``'s extra section):
+
+        - ``"high"``: Unsparing critique, demands specific evidence.
+        - ``"medium"``: Firm but acknowledges valid points.
+        - ``"low"``: Constructive concern-raising, softer tone.
+
         Args:
             topic: The clinical question or point of contention.
             opponent_brief: The brief from the agent being challenged.
@@ -199,6 +217,25 @@ class SkepticAgent(BaseAgent):
         """
         opponent_dx = ", ".join(opponent_brief.top3_differential) or "N/A"
         opponent_flags = ", ".join(opponent_brief.disagreement_flags) or "none"
+
+        # Tailor aggressiveness based on configured challenge strength
+        strength = self._config.extra.get("challenge_strength", "high")
+        if strength == "low":
+            tone_directive = (
+                "Adopt a constructive tone.  Raise concerns gently and "
+                "frame them as areas for further investigation rather "
+                "than direct attacks."
+            )
+        elif strength == "medium":
+            tone_directive = (
+                "Be firm but fair.  Acknowledge valid points before "
+                "challenging weak ones.  Demand evidence for strong "
+                "claims but avoid hostility."
+            )
+        else:  # "high" (default)
+            tone_directive = (
+                "Be direct, concise, and unsparing — but stay clinical."
+            )
 
         prompt = (
             "You are the SKEPTIC in a structured diagnostic debate.  Your "
@@ -220,7 +257,7 @@ class SkepticAgent(BaseAgent):
             "4. Demand specific evidence for any strong claims.\n"
             "5. Flag anchoring bias if the opponent relies too heavily on "
             "a single tool output.\n"
-            "6. Be direct, concise, and unsparing — but stay clinical."
+            f"6. {tone_directive}"
         )
 
         messages = [{"role": "user", "content": prompt}]

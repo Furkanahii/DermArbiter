@@ -1,10 +1,9 @@
 # DermArbiter ⚖️🩸
 
-[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg?style=flat-flat&logo=python)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=flat-flat)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg?style=flat-flat&logo=github-actions)]()
-[![LangGraph](https://img.shields.io/badge/LangGraph-0.2%2B-purple.svg?style=flat-flat)](https://github.com/langchain-ai/langgraph)
-[![arXiv](https://img.shields.io/badge/arXiv-2026.XXXXX-b31b1b.svg?style=flat-flat)]()
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg?style=flat&logo=python)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=flat)](LICENSE)
+[![Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg?style=flat&logo=github-actions)]()
+[![LangGraph](https://img.shields.io/badge/LangGraph-0.2%2B-purple.svg?style=flat)](https://github.com/langchain-ai/langgraph)
 
 > **Training-Free, Multi-Agent Collaborative Debate Framework for Equitable Dermatological Diagnosis**
 
@@ -83,8 +82,8 @@ DermArbiter maps distinct clinical roles to specialized LLMs to emulate a real-w
 | Agent | Model | Backend | Core Clinical Role |
 | :--- | :--- | :--- | :--- |
 | **Specialist** | Gemini 2.5 Flash | Google Gemini API | Deep domain-expert dermatological analysis and lesion feature extraction |
-| **Generalist** | MedGemma 4B | Local HF (GPU) | Broad medical knowledge base and contextual patient history processing |
-| **Skeptic** | Qwen3-8B-Instruct | Local HF (GPU) | Adversarial challenge, highlighting edge cases and alternative hypotheses |
+| **Generalist** | MedGemma 4B-IT | Local HF (GPU) | Broad medical knowledge base and contextual patient history processing |
+| **Skeptic** | Qwen3-8B | Local HF (GPU) | Adversarial challenge, highlighting edge cases and alternative hypotheses |
 | **Moderator** | Gemini 2.5 Flash | Google Gemini API | Debate synthesis, consensus calculation, and final report generation |
 
 ---
@@ -113,7 +112,7 @@ Agents query a rich registry of diagnostic tools to support their claims. DermAr
 
 ### 📋 Prerequisites
 
-- Python $\ge$ 3.10
+- Python ≥ 3.10
 - Optional: CUDA-capable GPU (Required for real local model execution; optional in `--mock` mode)
 - API key for Google Gemini (Google AI Studio)
 
@@ -169,7 +168,7 @@ python scripts/run_e2e_gpu.py \
 # Real Mode (requires GPU and API keys)
 python scripts/run_e2e_gpu.py \
     --config configs/ \
-    --image data/sample_lesion.jpg \
+    --image path/to/dermoscopy_image.jpg \
     --query "Scaling erythematous plaque on the extensor surface of the elbow" \
     --age 45 \
     --sex male \
@@ -216,6 +215,7 @@ DermArbiter/
 │   ├── agents.yaml           # Agent LLM configurations & debate settings
 │   ├── benchmarks.yaml       # Benchmark split paths & metrics
 │   ├── default.yaml          # Global execution, logging, and token limits
+│   ├── experiments.yaml      # Experiment & ablation configurations
 │   └── tools.yaml            # Tool-specific weight paths & thresholds
 ├── dermarbiter/              # Main package directory
 │   ├── core/                 # State-machine, debate protocol, and shared blackboard
@@ -271,7 +271,6 @@ If you use DermArbiter in your research or clinical analysis, please cite our up
 @article{dermarbiter2026,
   title     = {DermArbiter: Training-Free Multi-LLM Debate for Equitable Dermatological Diagnosis},
   author    = {Ahi, Furkan and Karaman, Mahmut Emre},
-  journal   = {Nature Medicine},
   year      = {2026},
   note      = {Manuscript in preparation}
 }

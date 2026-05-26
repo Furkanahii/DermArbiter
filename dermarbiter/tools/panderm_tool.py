@@ -132,6 +132,37 @@ class PanDermClassifier(BaseTool):
         self._device: Any = None
         self._loaded = False
 
+    @classmethod
+    def from_tool_config(cls, tool_config: Any) -> "PanDermClassifier":
+        """Construct from a ``ToolConfig`` instance.
+
+        Reads weight paths and runtime settings from the config's
+        ``extra`` dict, falling back to class defaults when keys are
+        absent.  This is the preferred construction path when using the
+        DermArbiter config system (``tools.yaml``).
+
+        Expected ``extra`` keys (all optional)::
+
+            model_path:  "weights/panderm.pth"
+            head_path:   "weights/panderm_head.pth"
+            device:      "auto"
+            top_k:       7
+
+        Args:
+            tool_config: A ``ToolConfig`` (or any object with an
+                ``extra`` dict attribute).
+
+        Returns:
+            A configured ``PanDermClassifier`` instance.
+        """
+        extra = getattr(tool_config, "extra", {})
+        return cls(
+            model_path=extra.get("model_path", DEFAULT_MODEL_PATH),
+            head_path=extra.get("head_path", DEFAULT_HEAD_PATH),
+            device=extra.get("device", "auto"),
+            top_k=int(extra.get("top_k", 7)),
+        )
+
     # -- Model lifecycle ---------------------------------------------------
 
     def _resolve_device(self) -> Any:
@@ -280,20 +311,36 @@ class PanDermClassifier(BaseTool):
         )
 
     def unload(self) -> None:
-        """Release the model from GPU memory."""
-        if self._model is not None or self._head is not None:
-            import torch
+        """Free GPU memory by unloading encoder, head, and transform.
 
-            del self._model
-            del self._head
-            self._model = None
-            self._head = None
-            self._loaded = False
+        Deletes the ViT encoder, classification head, image transform
+        pipeline, and device reference, then forces Python garbage
+        collection and clears the CUDA cache.  The model will be
+        re-loaded on the next ``run()`` call.
+        """
+        import gc
+
+        for attr in ("_model", "_head", "_transform"):
+            if hasattr(self, attr) and getattr(self, attr) is not None:
+                delattr(self, attr)
+        self._model = None
+        self._head = None
+        self._transform = None
+        self._device = None
+        self._loaded = False
+
+        gc.collect()
+        try:
+            import torch
 
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
+        except ImportError:
+            pass
 
-            logger.info("PanDerm model unloaded, GPU cache cleared.")
+        logger.info(
+            "Unloaded %s (~1.2 GB) to free GPU memory.", self.name,
+        )
 
     # -- Input validation --------------------------------------------------
 

@@ -159,20 +159,34 @@ class MedGemmaVQA(BaseTool):
         logger.info("MedGemma-4B loaded successfully.")
 
     def unload(self) -> None:
-        """Release model from GPU memory."""
-        if self._model is not None:
-            import torch
+        """Free GPU memory by unloading all model weights.
 
-            del self._model
-            del self._processor
-            self._model = None
-            self._processor = None
-            self._loaded = False
+        Deletes the model, processor, and device references, then
+        forces Python garbage collection and clears the CUDA cache.
+        The model will be re-loaded on the next ``run()`` call.
+        """
+        import gc
+
+        for attr in ("_model", "_processor"):
+            if hasattr(self, attr) and getattr(self, attr) is not None:
+                delattr(self, attr)
+        self._model = None
+        self._processor = None
+        self._device = None
+        self._loaded = False
+
+        gc.collect()
+        try:
+            import torch
 
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
+        except ImportError:
+            pass
 
-            logger.info("MedGemma-4B unloaded.")
+        logger.info(
+            "Unloaded %s (~3.3 GB) to free GPU memory.", self.name,
+        )
 
     # -- Validation --------------------------------------------------------
 

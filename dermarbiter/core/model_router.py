@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import os
+import random
 import time
 from enum import Enum
 from typing import Any, Optional
@@ -80,11 +81,21 @@ class ModelRouter:
         ])
     """
 
+    # Default retry parameters for transient API failures (rate limits,
+    # network timeouts).  Overridable via config.extra["router_*"] keys.
+    _DEFAULT_MAX_RETRIES: int = 3
+    _DEFAULT_BASE_DELAY_S: float = 1.0
+
     def __init__(self, config: DermArbiterConfig) -> None:
         self._config = config
         self._agent_configs: dict[str, AgentConfig] = config.agents
         self._gemini_llm_cache: dict[str, Any] = {}
         self._initialized_backends: set[ModelBackend] = set()
+
+        # Retry settings — configurable via top-level config extra keys
+        # (e.g. ``router_max_retries: 5`` in default.yaml).
+        self._max_retries: int = self._DEFAULT_MAX_RETRIES
+        self._base_delay_s: float = self._DEFAULT_BASE_DELAY_S
 
         # Eagerly validate that at least one backend is plausible
         self._init_backends()
@@ -184,9 +195,11 @@ class ModelRouter:
             if be not in self._initialized_backends:
                 continue
             try:
-                return self._dispatch(be, messages, model, temp, max_tok, **local_kwargs)
+                return self._call_with_retry(
+                    be, messages, model, temp, max_tok, **local_kwargs,
+                )
             except Exception as exc:
-                msg = f"Backend {be.value} failed: {exc}"
+                msg = f"Backend {be.value} failed after retries: {exc}"
                 logger.warning(msg)
                 errors.append(msg)
 
@@ -209,6 +222,58 @@ class ModelRouter:
             model = agent_cfg.model_name
 
         return _COST_PER_1K_TOKENS.get(model, 0.0)
+
+    # ------------------------------------------------------------------
+    # Retry logic
+    # ------------------------------------------------------------------
+
+    def _call_with_retry(
+        self,
+        backend: ModelBackend,
+        messages: list[dict[str, str]],
+        model: str,
+        temperature: float,
+        max_tokens: int,
+        **kwargs: Any,
+    ) -> str:
+        """Call ``_dispatch`` with exponential-backoff retry.
+
+        Retries up to ``self._max_retries`` times on transient failures
+        (rate-limit 429s, network timeouts, server 5xx errors).  Each
+        retry doubles the wait time with jitter to avoid thundering-herd
+        effects across concurrent agents.
+
+        Non-retryable errors (e.g. ``ValueError``, ``ImportError``) are
+        raised immediately.
+        """
+        last_exc: Exception | None = None
+        for attempt in range(self._max_retries + 1):
+            try:
+                return self._dispatch(
+                    backend, messages, model, temperature, max_tokens, **kwargs,
+                )
+            except (ValueError, ImportError, TypeError):
+                # Not transient — reraise immediately
+                raise
+            except Exception as exc:
+                last_exc = exc
+                if attempt < self._max_retries:
+                    delay = self._base_delay_s * (2 ** attempt)
+                    jitter = random.uniform(0, delay * 0.25)
+                    total_delay = delay + jitter
+                    logger.warning(
+                        "Backend %s attempt %d/%d failed: %s — "
+                        "retrying in %.1fs",
+                        backend.value,
+                        attempt + 1,
+                        self._max_retries + 1,
+                        exc,
+                        total_delay,
+                    )
+                    time.sleep(total_delay)
+
+        # All retries exhausted
+        raise last_exc  # type: ignore[misc]
 
     # ------------------------------------------------------------------
     # Dispatch

@@ -105,16 +105,36 @@ class CaseRAG(BaseTool):
         )
 
     def unload(self) -> None:
-        if self._model is not None:
+        """Free GPU memory by unloading DermLIP encoder and references.
+
+        Deletes the CLIP model, image preprocessor, and ChromaDB
+        collection reference, then forces Python garbage collection
+        and clears the CUDA cache.  The model will be re-loaded on
+        the next ``run()`` call.
+        """
+        import gc
+
+        for attr in ("_model", "_preprocess"):
+            if hasattr(self, attr) and getattr(self, attr) is not None:
+                delattr(self, attr)
+        self._model = None
+        self._preprocess = None
+        self._collection = None
+        self._device = None
+        self._loaded = False
+
+        gc.collect()
+        try:
             import torch
 
-            del self._model
-            self._model = None
-            self._collection = None
-            self._loaded = False
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
-            logger.info("CaseRAG unloaded.")
+        except ImportError:
+            pass
+
+        logger.info(
+            "Unloaded %s to free GPU memory.", self.name,
+        )
 
     def validate_input(self, image_path: str | None = None, query: str = "") -> bool:
         if image_path is None:

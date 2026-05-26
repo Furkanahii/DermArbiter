@@ -76,7 +76,7 @@ Upload `run_e2e_colab.py` to Colab or clone the repo, then:
 ```python
 # In a Colab cell:
 %cd /content
-!git clone <your-repo-url> DermArbiter
+!git clone https://github.com/Furkanahii/DermArbiter.git DermArbiter
 %cd DermArbiter
 %run scripts/run_e2e_colab.py --query "Changing mole on back" --mock
 ```

@@ -148,7 +148,13 @@ class ModeratorAgent(BaseAgent):
                 return AgentBrief(
                     agent_role=self.role,
                     top3_differential=parsed["top3_differential"][:5],
-                    confidence=parsed.get("confidence", 0.5),
+                    confidence=self._calibrate_confidence(
+                        raw_confidence=parsed.get("confidence", 0.5),
+                        n_evidence_cards=len(evidence_cards),
+                        n_disagreement_flags=len(
+                            parsed.get("disagreement_flags", [])
+                        ),
+                    ),
                     reasoning=parsed.get("reasoning", ""),
                     cited_cards=cited,
                     disagreement_flags=parsed.get("disagreement_flags", []),
@@ -232,9 +238,60 @@ class ModeratorAgent(BaseAgent):
                 "[%s] Argument generation failed: %s", self.role, exc,
             )
             return (
-                f"[{self.role}] Unable to generate mediation response.  "
-                f"The panel should proceed with the current evidence."
+                f"[{self.role}] LLM mediation unavailable.  The panel "
+                f"should rely on the evidence cards on record and each "
+                f"agent's stated reasoning.  Key considerations: "
+                f"(1) verify agreement on primary diagnosis across agents, "
+                f"(2) review any disagreement flags, "
+                f"(3) weight evidence quality over agent authority."
             )
+
+    # ------------------------------------------------------------------
+    # Confidence calibration
+    # ------------------------------------------------------------------
+
+    def _calibrate_confidence(
+        self,
+        raw_confidence: float,
+        n_evidence_cards: int,
+        n_disagreement_flags: int = 0,
+    ) -> float:
+        """Adjust raw LLM-reported confidence using evidence convergence.
+
+        The LLM's self-reported confidence tends to be poorly calibrated
+        (typically overconfident).  This method applies two heuristic
+        corrections:
+
+        1. **Evidence penalty**: If fewer than 3 evidence cards are
+           available, the confidence is dampened — sparse evidence does
+           not warrant high certainty.
+        2. **Disagreement penalty**: Each unresolved disagreement flag
+           reduces confidence, reflecting genuine panel divergence.
+
+        The result is clamped to [0.1, 0.95] to avoid pathological
+        extremes that would distort downstream consensus scoring.
+
+        Args:
+            raw_confidence: The confidence value produced by the LLM
+                (expected range [0, 1]).
+            n_evidence_cards: Number of evidence cards considered.
+            n_disagreement_flags: Number of unresolved disagreement flags.
+
+        Returns:
+            Calibrated confidence in [0.1, 0.95].
+        """
+        adjusted = float(raw_confidence)
+
+        # Sparse-evidence penalty: reduce by up to 20% when evidence is thin
+        if n_evidence_cards < 3:
+            evidence_factor = 0.8 + 0.2 * (n_evidence_cards / 3.0)
+            adjusted *= evidence_factor
+
+        # Disagreement penalty: 5% per flag, capped at 25%
+        flag_penalty = min(n_disagreement_flags * 0.05, 0.25)
+        adjusted -= flag_penalty
+
+        return max(0.1, min(0.95, adjusted))
 
     # ------------------------------------------------------------------
     # Moderator-only methods

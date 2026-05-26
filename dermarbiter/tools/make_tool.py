@@ -201,20 +201,37 @@ class MAKEAnnotator(BaseTool):
         logger.info("MAKE annotator loaded with %d concepts.", len(self._concepts))
 
     def unload(self) -> None:
-        """Release model from GPU memory."""
-        if self._model is not None:
-            import torch
+        """Free GPU memory by unloading CLIP model and cached tensors.
 
-            del self._model
-            del self._text_features
-            self._model = None
-            self._text_features = None
-            self._loaded = False
+        Deletes the CLIP model, image preprocessor, tokenizer, and
+        pre-computed text feature embeddings, then forces Python
+        garbage collection and clears the CUDA cache.  The model
+        will be re-loaded on the next ``run()`` call.
+        """
+        import gc
+
+        for attr in ("_model", "_preprocess", "_tokenizer", "_text_features"):
+            if hasattr(self, attr) and getattr(self, attr) is not None:
+                delattr(self, attr)
+        self._model = None
+        self._preprocess = None
+        self._tokenizer = None
+        self._text_features = None
+        self._device = None
+        self._loaded = False
+
+        gc.collect()
+        try:
+            import torch
 
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
+        except ImportError:
+            pass
 
-            logger.info("MAKE annotator unloaded.")
+        logger.info(
+            "Unloaded %s (~1.7 GB) to free GPU memory.", self.name,
+        )
 
     # -- Validation --------------------------------------------------------
 

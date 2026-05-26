@@ -34,7 +34,7 @@ tools:
   case_rag:
     name: CaseRAG
     description: Retrieval-augmented generation over dermatology case databases
-    db_path: chroma_db/cases
+    db_path: data/chroma_cases
     collection: derm_cases
     top_k: 5
     enabled: true
@@ -45,7 +45,7 @@ tools:
   guideline_rag:
     name: GuidelineRAG
     description: RAG over clinical dermatology guidelines and textbooks
-    db_path: chroma_db/guidelines
+    db_path: data/chroma_guidelines
     collection: derm_guidelines
     top_k: 3
     enabled: true

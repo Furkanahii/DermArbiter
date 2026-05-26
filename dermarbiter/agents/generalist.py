@@ -180,6 +180,16 @@ class GeneralistAgent(BaseAgent):
         The generalist challenges over-specialised diagnoses with
         epidemiological reasoning and patient-centred concerns.
 
+        .. note:: **Image embedding in debate prompts**
+
+           Direct image embedding was considered here but intentionally
+           omitted.  Debate arguments operate on inter-agent reasoning
+           and structured evidence cards — not raw pixel data.  Image
+           features are already captured by upstream tools (PanDerm,
+           DermoGPT) and surfaced via ``EvidenceCard.tool_output``.
+           Adding raw images to debate prompts would inflate token cost
+           without meaningfully improving argument quality.
+
         Args:
             topic: The clinical question or point of contention.
             opponent_brief: The brief from the agent being challenged.

@@ -76,6 +76,37 @@ class DermoGPTVQA(BaseTool):
         self._device: Any = None
         self._loaded = False
 
+    @classmethod
+    def from_tool_config(cls, tool_config: Any) -> "DermoGPTVQA":
+        """Construct from a ``ToolConfig`` instance.
+
+        Reads model settings from the config's ``extra`` dict, falling
+        back to class defaults when keys are absent.  This is the
+        preferred construction path when using the DermArbiter config
+        system (``tools.yaml``).
+
+        Expected ``extra`` keys (all optional)::
+
+            model_id:        "mendicant04/DermoGPT-RL"
+            max_new_tokens:  256
+            device:          "auto"
+            quantize_4bit:   true
+
+        Args:
+            tool_config: A ``ToolConfig`` (or any object with an
+                ``extra`` dict attribute).
+
+        Returns:
+            A configured ``DermoGPTVQA`` instance.
+        """
+        extra = getattr(tool_config, "extra", {})
+        return cls(
+            model_id=extra.get("model_id", DEFAULT_MODEL_ID),
+            max_new_tokens=int(extra.get("max_new_tokens", DEFAULT_MAX_NEW_TOKENS)),
+            device=extra.get("device", "auto"),
+            quantize_4bit=bool(extra.get("quantize_4bit", True)),
+        )
+
     # -- Device ------------------------------------------------------------
 
     def _resolve_device(self) -> Any:
@@ -168,20 +199,34 @@ class DermoGPTVQA(BaseTool):
         logger.info("DermoGPT-RL loaded successfully.")
 
     def unload(self) -> None:
-        """Release model from GPU memory."""
-        if self._model is not None:
-            import torch
+        """Free GPU memory by unloading all model weights.
 
-            del self._model
-            del self._processor
-            self._model = None
-            self._processor = None
-            self._loaded = False
+        Deletes the model, processor, and device references, then
+        forces Python garbage collection and clears the CUDA cache.
+        The model will be re-loaded on the next ``run()`` call.
+        """
+        import gc
+
+        for attr in ("_model", "_processor"):
+            if hasattr(self, attr) and getattr(self, attr) is not None:
+                delattr(self, attr)
+        self._model = None
+        self._processor = None
+        self._device = None
+        self._loaded = False
+
+        gc.collect()
+        try:
+            import torch
 
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
+        except ImportError:
+            pass
 
-            logger.info("DermoGPT-RL unloaded.")
+        logger.info(
+            "Unloaded %s (~7 GB) to free GPU memory.", self.name,
+        )
 
     # -- Validation --------------------------------------------------------
 

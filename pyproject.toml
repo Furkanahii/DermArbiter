@@ -11,7 +11,7 @@ license = {text = "MIT"}
 requires-python = ">=3.10"
 authors = [
     {name = "Furkan Ahi"},
-    {name = "Mahmut Emre"},
+    {name = "Mahmut Emre Karaman"},
 ]
 keywords = ["dermatology", "LLM", "multi-agent", "debate", "diagnosis"]
 classifiers = [
@@ -30,7 +30,7 @@ classifiers = [
 name = "dermarbiter"
 version = "0.1.0"
 description = "Training-free multi-LLM debate framework for dermatological diagnosis"
-authors = ["Furkan Ahi", "Mahmut Emre"]
+authors = ["Furkan Ahi", "Mahmut Emre Karaman"]
 license = "MIT"
 readme = "README.md"
 packages = [{include = "dermarbiter"}]

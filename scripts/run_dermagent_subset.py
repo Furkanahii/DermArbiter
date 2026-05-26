@@ -500,6 +500,17 @@ def run(args: argparse.Namespace) -> int:
         orchestrator = _build_real_orchestrator(args)
         runner = lambda c: _run_one_real(c, orchestrator)  # noqa: E731
 
+    # NOTE: Checkpoint/resume support is intentionally omitted.  The design
+    # relies on three properties that make checkpointing unnecessary:
+    #   (1) Each run produces a timestamped JSONL file — partial results
+    #       from interrupted runs are preserved and can be analysed as-is.
+    #   (2) Failed cases are recorded inline with an "error" key rather than
+    #       aborting the loop, so transient failures don't lose progress.
+    #   (3) The --max-cases + --stratified flags allow cheap partial re-runs
+    #       that are class-balanced, making incremental evaluation practical.
+    # If checkpoint/resume is needed for very long runs (e.g. full 642-case
+    # real-mode on slow hardware), the JSONL output can be filtered against
+    # previously completed case_ids at the start of a subsequent run.
     records: list[dict[str, Any]] = []
     t0 = time.perf_counter()
     for i, case in enumerate(cases, start=1):

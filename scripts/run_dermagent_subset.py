@@ -33,6 +33,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 import time
 from datetime import datetime, timezone
@@ -217,18 +218,33 @@ def _build_real_orchestrator(args: argparse.Namespace) -> Any:
             temperature=cfg.default_temperature,
         ))
 
+    # T4 (15 GB) can't hold DermoGPT-RL (~17 GB FP16 / ~7 GB 4-bit) on top of
+    # the other tools because the orchestrator doesn't unload between tool
+    # calls. Allow opt-out via env var; e.g. `DERMARBITER_DISABLE_TOOLS=dermogpt_vqa`
+    # before running this script keeps the rest of the panel intact.
+    disabled = {
+        t.strip() for t in os.environ.get("DERMARBITER_DISABLE_TOOLS", "").split(",")
+        if t.strip()
+    }
+    if disabled:
+        logger.info("Tools disabled via env: %s", sorted(disabled))
+
     registry = ToolRegistry()
     registered: list[str] = []
     for ToolCls in (PanDermClassifier, MAKEAnnotator, DermoGPTVQA, MedGemmaVQA,
                     GuidelineRAG, CaseRAG, OntologyGraph, FairnessProbe,
                     UncertaintyProbe):
         try:
-            registry.register(ToolCls())
+            inst = ToolCls()
+            if inst.name in disabled:
+                logger.info("Skipping disabled tool: %s", inst.name)
+                continue
+            registry.register(inst)
             registered.append(ToolCls.__name__)
         except Exception as exc:
             logger.warning("Skipped tool %s: %s", ToolCls.__name__, exc)
-    logger.info("Registered %d/%d tools: %s",
-                len(registered), 9, ", ".join(registered))
+    logger.info("Registered %d tools: %s",
+                len(registered), ", ".join(registered))
 
     agents = {
         "specialist": SpecialistAgent(config=agent_configs["specialist"],

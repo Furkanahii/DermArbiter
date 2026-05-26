@@ -25,7 +25,7 @@ agents:
   generalist:
     name: Generalist
     description: Broad medical knowledge agent with multimodal visual grounding
-    model: medgemma-4b
+    model: google/medgemma-4b-it
     backend: local_hf
     device: cuda
     quantization: 4bit
@@ -43,7 +43,7 @@ agents:
   skeptic:
     name: Skeptic
     description: Adversarial agent that challenges diagnoses and raises counter-arguments
-    model: Qwen/Qwen3-8B-Instruct
+    model: Qwen/Qwen3-8B
     backend: local_hf
     device: cuda
     quantization: 4bit

@@ -320,6 +320,35 @@ class MockModerator(MockBaseAgent):
             "Final recommendation: excisional biopsy."
         )
 
+    def should_early_exit(self, briefs: dict[str, AgentBrief]) -> bool:
+        """Determine whether mock early exit is warranted."""
+        if len(briefs) < 2:
+            return False
+        primaries = []
+        for role, brief in briefs.items():
+            if brief.disagreement_flags:
+                return False
+            if brief.top3_differential:
+                primaries.append(brief.top3_differential[0].strip().lower())
+        if not primaries:
+            return False
+        return len(set(primaries)) == 1
+
+    def synthesize_final_report(self, blackboard: Any) -> str:
+        """Produce a comprehensive mock clinical report from blackboard state."""
+        return (
+            f"# DermArbiter Clinical Report — {blackboard.case_id}\n\n"
+            f"## Summary\n"
+            f"Multi-expert consensus analysis for dermatological case {blackboard.case_id}.\n\n"
+            f"## Differential Diagnosis\n"
+            f"1. Melanoma (Confidence: 0.85)\n"
+            f"2. Dysplastic Nevus (Confidence: 0.68)\n"
+            f"3. Basal Cell Carcinoma (Confidence: 0.55)\n\n"
+            f"## Recommended Next Steps\n"
+            f"Excisional biopsy of the lesion is recommended based on high confidence multi-modal evidence convergence."
+        )
+
+
 
 # ---------------------------------------------------------------------------
 # Factory

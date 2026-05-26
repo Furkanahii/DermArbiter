@@ -13,7 +13,7 @@ format:
 	poetry run ruff format dermarbiter/ tests/
 
 demo:
-	poetry run python -m dermarbiter.demo
+	python3 notebooks/02_agent_demo.py
 
 clean:
 	find . -type d -name __pycache__ -exec rm -rf {} +

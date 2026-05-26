@@ -185,7 +185,15 @@ class ModelRouter:
         }
         local_kwargs.update(kwargs)
 
-        # Try primary backend, then fallbacks
+        # Try primary backend, then fallbacks.
+        # Model IDs are backend-specific (Qwen/Qwen3-8B only resolves on
+        # HuggingFace, gemini-2.5-flash only on Google API). When a local_hf
+        # model fails to load, falling back to google_api with the SAME
+        # model id sent a request to
+        # ``generativelanguage.googleapis.com/.../Qwen/Qwen3-8B`` → 404
+        # NotFound. Per-backend fallback model: use the agent's primary
+        # model for its own backend, and ``cfg.default_model`` for any
+        # cross-backend fallback to Gemini.
         errors: list[str] = []
         backends_to_try = [backend] + [
             b for b in _FALLBACK_ORDER if b != backend
@@ -194,12 +202,33 @@ class ModelRouter:
         for be in backends_to_try:
             if be not in self._initialized_backends:
                 continue
+            # If fallback backend is incompatible with the primary's model
+            # id (e.g. cross-family), substitute a backend-appropriate model.
+            be_model = model
+            if be != backend:
+                if be == ModelBackend.GOOGLE_API:
+                    be_model = self._config.default_model
+                elif be == ModelBackend.GROQ_API:
+                    # Conservative Groq default; bail if no Groq pref is set.
+                    be_model = getattr(self._config, "default_groq_model",
+                                       "llama-3.3-70b-versatile")
+                elif be == ModelBackend.LOCAL_HF:
+                    # No safe local fallback for an arbitrary Gemini model.
+                    msg = (f"Skipping cross-backend fallback to local_hf "
+                           f"for model {model!r} (no compatible local).")
+                    logger.info(msg)
+                    errors.append(msg)
+                    continue
+                logger.info(
+                    "Fallback %s → %s: substituting model %r for %r",
+                    backend.value, be.value, be_model, model,
+                )
             try:
                 return self._call_with_retry(
-                    be, messages, model, temp, max_tok, **local_kwargs,
+                    be, messages, be_model, temp, max_tok, **local_kwargs,
                 )
             except Exception as exc:
-                msg = f"Backend {be.value} failed after retries: {exc}"
+                msg = f"Backend {be.value} ({be_model}) failed after retries: {exc}"
                 logger.warning(msg)
                 errors.append(msg)
 
@@ -447,10 +476,39 @@ class ModelRouter:
 
     # ----- shared bnb config -----
 
+    def _purge_cuda_cache(self) -> None:
+        """Free up VRAM aggressively before loading a heavy model.
+
+        T4 (16 GB) is borderline with two 4-bit local LLMs after Phase 1's
+        tool churn. Even if the previous tool called ``.unload()``,
+        PyTorch's allocator may still hold the freed blocks in its cache;
+        the next ``from_pretrained`` then sees only the *currently allocated*
+        free pool and trips bitsandbytes' "Some modules are dispatched on
+        the CPU or the disk" error during quantization.
+        """
+        import gc
+        try:
+            import torch
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+        except Exception as exc:
+            logger.warning("CUDA cache purge skipped: %s", exc)
+
     def _local_load_kwargs(
         self, device: str, quantization: Optional[str], hf_token: Optional[str],
     ) -> dict[str, Any]:
-        """Common ``from_pretrained(**kwargs)`` for text + multimodal paths."""
+        """Common ``from_pretrained(**kwargs)`` for text + multimodal paths.
+
+        Sets ``llm_int8_enable_fp32_cpu_offload=True`` on bitsandbytes so
+        when the quantized model can't fit purely on T4 VRAM, the
+        remaining layers spill to CPU in fp32 instead of erroring out.
+        Inference is slower for the offloaded layers but the model loads
+        and runs to completion — far better than failing into the
+        fallback chain (which fed local model IDs to Gemini API and got
+        404s for ``Qwen/Qwen3-8B`` and ``google/medgemma-4b-it``).
+        """
         import torch
 
         kwargs: dict[str, Any] = {
@@ -465,11 +523,15 @@ class ModelRouter:
                 bnb_4bit_compute_dtype=torch.float16,
                 bnb_4bit_use_double_quant=True,
                 bnb_4bit_quant_type="nf4",
+                llm_int8_enable_fp32_cpu_offload=True,
             )
             kwargs["device_map"] = "auto"
         elif quantization in ("8bit", "8") and device != "cpu":
             from transformers import BitsAndBytesConfig
-            kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
+            kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_8bit=True,
+                llm_int8_enable_fp32_cpu_offload=True,
+            )
             kwargs["device_map"] = "auto"
         else:
             kwargs["device_map"] = "auto" if device == "cuda" else {"": device}
@@ -495,6 +557,7 @@ class ModelRouter:
                 "Loading local TEXT model %s (device=%s, quant=%s)…",
                 model, device, quantization,
             )
+            self._purge_cuda_cache()   # reclaim VRAM from any prior tool
             tokenizer = AutoTokenizer.from_pretrained(
                 model, trust_remote_code=True, token=hf_token,
             )
@@ -575,6 +638,7 @@ class ModelRouter:
                 "Loading local MULTIMODAL model %s (device=%s, quant=%s)…",
                 model, device, quantization,
             )
+            self._purge_cuda_cache()   # reclaim VRAM from any prior tool
             load_kwargs = self._local_load_kwargs(device, quantization, hf_token)
             # Force bfloat16 for multimodal models — float16 produces NaN
             # logits on Gemma3 / MedGemma and silently yields empty output.

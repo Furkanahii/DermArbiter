@@ -112,6 +112,46 @@ def _find_balanced_braces(text: str) -> str | None:
     return None
 
 
+def _salvage_truncated_json(text: str) -> dict[str, Any] | None:
+    """Last-resort recovery for JSON that was cut off by max_output_tokens.
+
+    Gemini hits its token budget mid-reasoning, the closing brace never
+    arrives, _find_balanced_braces returns None, and a perfectly valid
+    top3_differential array vanishes with it. This walks the text once
+    looking for the ``"top3_differential": [ ... ]`` array specifically
+    and reconstructs a minimal dict if found. Confidence/reasoning land
+    as best-effort fallbacks when present in the prefix.
+    """
+    # Pull out the top3_differential array (regex tolerant of whitespace
+    # and newlines between elements).
+    m = re.search(
+        r'"top3_differential"\s*:\s*\[\s*((?:"[^"]*"\s*,?\s*)+)\]',
+        text, re.DOTALL,
+    )
+    if not m:
+        return None
+    items = re.findall(r'"([^"]+)"', m.group(1))
+    if not items:
+        return None
+
+    result: dict[str, Any] = {"top3_differential": items[:5]}
+
+    # Bonus: pull confidence if it's complete.
+    c = re.search(r'"confidence"\s*:\s*([0-9]*\.?[0-9]+)', text)
+    if c:
+        try:
+            result["confidence"] = float(c.group(1))
+        except ValueError:
+            pass
+
+    # Bonus: prefix of reasoning, even if truncated.
+    r = re.search(r'"reasoning"\s*:\s*"([^"]*)', text, re.DOTALL)
+    if r:
+        result["reasoning"] = r.group(1).strip()
+
+    return result
+
+
 def extract_json(text: str) -> dict[str, Any]:
     """Best-effort extraction of a JSON object from free-form LLM output.
 
@@ -120,9 +160,11 @@ def extract_json(text: str) -> dict[str, Any]:
         2. Fenced ``` ... ``` block (no language tag) — Gemini sometimes
            omits the ``json`` after the opening fence.
         3. First balanced ``{ ... }`` span found by brace-counting.
+        4. Salvage path: regex-extract ``top3_differential`` even when
+           the response was truncated mid-reasoning by max_output_tokens.
 
     Returns the parsed dict, or ``{}`` if every strategy fails. When
-    extraction fails the caller is expected to log ``text[:300]`` at
+    extraction fails the caller is expected to log ``text[:800]`` at
     WARNING level so we can see what the model actually returned.
     """
     # 1. Fenced ```json ... ``` block.
@@ -145,6 +187,11 @@ def extract_json(text: str) -> dict[str, Any]:
         parsed = _try_parse(balanced)
         if parsed is not None:
             return parsed
+
+    # 4. Salvage truncated JSON (max_output_tokens cutoff).
+    salvaged = _salvage_truncated_json(text)
+    if salvaged is not None:
+        return salvaged
 
     return {}
 

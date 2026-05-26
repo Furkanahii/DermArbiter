@@ -11,7 +11,7 @@ agents:
     model: gemini-2.5-flash
     backend: google_api
     temperature: 0.1
-    max_tokens: 2048
+    max_tokens: 4096
     top_p: 0.95
     system_prompt_key: specialist
     has_tool_access: true
@@ -30,7 +30,7 @@ agents:
     device: cuda
     quantization: 4bit
     temperature: 0.3
-    max_tokens: 2048
+    max_tokens: 4096
     top_p: 0.9
     system_prompt_key: generalist
     has_tool_access: true
@@ -48,7 +48,7 @@ agents:
     device: cuda
     quantization: 4bit
     temperature: 0.5
-    max_tokens: 2048
+    max_tokens: 4096
     top_p: 0.9
     system_prompt_key: skeptic
     has_tool_access: false

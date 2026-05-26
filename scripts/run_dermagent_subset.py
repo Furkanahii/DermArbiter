@@ -352,22 +352,95 @@ def _build_real_orchestrator(args: argparse.Namespace) -> Any:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def load_subset(path: Path, max_cases: Optional[int] = None) -> list[dict[str, Any]]:
+def _stratified_pick(
+    cases: list[dict[str, Any]],
+    n: int,
+    *,
+    key: str = "ground_truth_label",
+    seed: int = 42,
+) -> list[dict[str, Any]]:
+    """Class-stratified subsample. Proportional quotas + largest-remainder
+    fallback so the per-class quota sums exactly to n. Falls through to a
+    plain shuffle if the stratify key is missing.
+    """
+    import random
+    from collections import defaultdict
+
+    rng = random.Random(seed)
+    if n >= len(cases):
+        return list(cases)
+
+    buckets: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for c in cases:
+        buckets[(c.get(key) or "unknown")].append(c)
+
+    total = len(cases)
+    quotas: dict[str, int] = {}
+    remainders: list[tuple[str, float]] = []
+    used = 0
+    for label, bucket in buckets.items():
+        exact = n * len(bucket) / total
+        quotas[label] = int(exact)
+        remainders.append((label, exact - int(exact)))
+        used += quotas[label]
+    for label, _ in sorted(remainders, key=lambda x: -x[1]):
+        if used >= n:
+            break
+        if quotas[label] < len(buckets[label]):
+            quotas[label] += 1
+            used += 1
+
+    sampled: list[dict[str, Any]] = []
+    for label, q in quotas.items():
+        bucket = buckets[label][:]
+        rng.shuffle(bucket)
+        sampled.extend(bucket[:q])
+    rng.shuffle(sampled)
+    return sampled
+
+
+def load_subset(
+    path: Path,
+    max_cases: Optional[int] = None,
+    *,
+    stratified: bool = False,
+    seed: int = 42,
+) -> list[dict[str, Any]]:
+    """Load the per-case JSONL.
+
+    Default behaviour: read in file order, stop at ``max_cases``. Use this
+    for deterministic small smokes (first N entries are stable).
+
+    ``stratified=True``: read the whole file, then class-stratified-sample
+    ``max_cases`` rows so every label is represented proportionally. The
+    full HAM10000 dermagent subset is heavily nv-skewed (331/642 are nv)
+    and not pre-shuffled, so a naive first-N slice would yield a single-
+    class mini-benchmark.
+    """
     if not path.exists():
         raise FileNotFoundError(
             f"{path} not found. Build it first:\n"
             f"  python scripts/build_dermagent_subset.py"
         )
-    cases = []
+
+    if not stratified:
+        cases = []
+        with path.open("r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                cases.append(json.loads(line))
+                if max_cases and len(cases) >= max_cases:
+                    break
+        return cases
+
+    # Stratified path: full read → proportional sample.
     with path.open("r", encoding="utf-8") as fh:
-        for line in fh:
-            line = line.strip()
-            if not line:
-                continue
-            cases.append(json.loads(line))
-            if max_cases and len(cases) >= max_cases:
-                break
-    return cases
+        all_cases = [json.loads(line) for line in fh if line.strip()]
+    if max_cases is None or max_cases >= len(all_cases):
+        return all_cases
+    return _stratified_pick(all_cases, max_cases, seed=seed)
 
 
 def _summarise(records: list[dict[str, Any]]) -> dict[str, Any]:
@@ -401,8 +474,24 @@ def _summarise(records: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def run(args: argparse.Namespace) -> int:
-    cases = load_subset(Path(args.subset), max_cases=args.max_cases)
-    logger.info("Loaded %d cases from %s", len(cases), args.subset)
+    cases = load_subset(
+        Path(args.subset),
+        max_cases=args.max_cases,
+        stratified=getattr(args, "stratified", False),
+        seed=getattr(args, "seed", 42),
+    )
+    logger.info(
+        "Loaded %d cases from %s%s",
+        len(cases), args.subset,
+        " (stratified)" if getattr(args, "stratified", False) else "",
+    )
+
+    # Show per-class distribution of the actual loaded sample so it's
+    # obvious whether the mini-benchmark hit every class.
+    from collections import Counter
+    dist = Counter(c.get("ground_truth_label", "?") for c in cases)
+    logger.info("Class distribution: %s",
+                ", ".join(f"{k}={v}" for k, v in sorted(dist.items())))
 
     if args.mock:
         runner = _run_one_mock
@@ -483,6 +572,12 @@ def _build_argparser() -> argparse.ArgumentParser:
     p.add_argument("--tools", help="Path to tools.yaml (real mode).")
     p.add_argument("--max-cases", type=int, default=None,
                    help="Cap the number of cases evaluated (smoke test).")
+    p.add_argument("--stratified", action="store_true", default=False,
+                   help="With --max-cases: class-stratified sample instead of "
+                        "the first N entries. Needed because the published "
+                        "DermAgent subset isn't pre-shuffled.")
+    p.add_argument("--seed", type=int, default=42,
+                   help="Stratified sampling seed for reproducibility.")
     p.add_argument("-v", "--verbose", action="store_true")
     return p
 

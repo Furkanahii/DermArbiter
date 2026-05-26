@@ -45,6 +45,50 @@ logger = logging.getLogger("run_dermagent_subset")
 DEFAULT_SUBSET_JSONL = "data/ham10000/dermagent_subset.jsonl"
 DEFAULT_OUTPUT_DIR = "experiments/results"
 
+# HAM10000 official 7-class codes ↔ free-text labels the LLM/agent layer
+# tends to emit. The benchmark JSONL records ground_truth in HAM10000 codes
+# (nv, mel, bkl, …) but agents say "melanocytic_nevus", "seborrheic_keratosis",
+# etc. Normalize predictions so apples-to-apples accuracy actually works.
+_HAM10000_LABEL_MAP: dict[str, str] = {
+    # nv — melanocytic nevus
+    "melanocytic_nevus": "nv", "melanocytic nevus": "nv",
+    "nevus": "nv", "compound_nevus": "nv", "compound nevus": "nv",
+    "atypical_nevus": "nv", "atypical nevus": "nv",
+    # mel — melanoma
+    "melanoma": "mel", "malignant_melanoma": "mel",
+    # bkl — benign keratosis-like (seborrheic, solar lentigo, lichen planus)
+    "seborrheic_keratosis": "bkl", "seborrheic keratosis": "bkl",
+    "solar_lentigo": "bkl", "solar lentigo": "bkl",
+    "lichen_planus_like_keratosis": "bkl", "benign_keratosis": "bkl",
+    # bcc — basal cell carcinoma
+    "basal_cell_carcinoma": "bcc", "basal cell carcinoma": "bcc",
+    # akiec — actinic keratosis / Bowen
+    "actinic_keratosis": "akiec", "actinic keratosis": "akiec",
+    "squamous_cell_carcinoma_in_situ": "akiec",
+    "intraepithelial_carcinoma": "akiec", "bowen_disease": "akiec",
+    # df — dermatofibroma
+    "dermatofibroma": "df",
+    # vasc — vascular
+    "vascular_lesion": "vasc", "vascular lesion": "vasc",
+    "hemangioma": "vasc", "angioma": "vasc",
+    # Already-coded inputs pass through.
+    "nv": "nv", "mel": "mel", "bkl": "bkl", "bcc": "bcc",
+    "akiec": "akiec", "df": "df", "vasc": "vasc",
+}
+
+
+def _normalize_label(raw: str) -> str:
+    """Map free-text dermatology labels to HAM10000 7-class codes.
+
+    Case-insensitive, strips punctuation/spaces, returns the raw lowercased
+    value when no mapping exists (keeps accuracy honest — unknown labels
+    miss instead of silently passing).
+    """
+    if not raw:
+        return ""
+    key = raw.strip().lower().replace("-", "_")
+    return _HAM10000_LABEL_MAP.get(key, key)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Output schema
@@ -145,9 +189,27 @@ def _run_one_real(
     # Coerce dict / Pydantic-model to dict access uniformly.
     get = state.get if isinstance(state, dict) else lambda k, d=None: getattr(state, k, d)
 
+    # Primary path: orchestrator's consensus pick.
+    final_dx = list(get("final_diagnosis", []) or [])
+
+    # Fallback 1: empty consensus but moderator's brief has a top-3 → use it.
+    # Comes up when 1+ peer agents JSON-parse-fail; the moderator (which still
+    # ran successfully because it operates on tool outputs directly) holds the
+    # only reliable diagnosis on the blackboard.
+    if not final_dx:
+        briefs = get("briefs", {}) or {}
+        mod_brief = briefs.get("moderator")
+        if mod_brief is not None:
+            top3 = list(getattr(mod_brief, "top3_differential", []) or [])
+            if top3:
+                final_dx = top3
+
+    # Normalize labels to HAM10000 codes (agent layer emits free text).
+    final_dx_norm = [_normalize_label(d) for d in final_dx if d]
+
     return _to_metrics_record(
         case=case,
-        final_diagnosis=list(get("final_diagnosis", []) or []),
+        final_diagnosis=final_dx_norm,
         consensus_score=float(get("consensus_score", 0.0) or 0.0),
         early_exit=bool(get("early_exit", False)),
         debate_rounds=len(get("debate_log", []) or []),

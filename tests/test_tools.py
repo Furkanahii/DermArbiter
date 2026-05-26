@@ -407,3 +407,109 @@ class TestToolRegistryRunBatch:
         assert len(outputs) == 9
         assert all(isinstance(o, ToolOutput) for o in outputs)
         assert all(o.confidence >= 0.0 for o in outputs)
+
+    def test_run_batch_no_unload_when_disabled(self, mock_tool_registry: ToolRegistry):
+        """When unload_after_run=False, unload() should not be called."""
+        outputs = mock_tool_registry.run_batch(
+            tool_names=["panderm_classifier"],
+            unload_after_run=False,
+        )
+        assert len(outputs) == 1
+        # Mock tools don't have unload, but the code path should work
+
+    def test_run_batch_unload_after_run_calls_unload(self):
+        """When a tool has unload(), it should be called after run."""
+        from unittest.mock import MagicMock
+
+        mock_tool = MagicMock(spec=BaseTool)
+        mock_tool.name = "test_tool"
+        mock_tool.description = "Test tool"
+        mock_tool.run.return_value = ToolOutput(
+            tool_name="test_tool", result={}, confidence=0.5,
+            raw_text="test", metadata={},
+        )
+        mock_tool.unload = MagicMock()
+
+        registry = ToolRegistry()
+        registry.register(mock_tool)
+
+        registry.run_batch(["test_tool"], unload_after_run=True)
+        mock_tool.unload.assert_called_once()
+
+    def test_run_batch_unload_false_skips_unload(self):
+        """When unload_after_run=False, unload() should NOT be called."""
+        from unittest.mock import MagicMock
+
+        mock_tool = MagicMock(spec=BaseTool)
+        mock_tool.name = "test_tool"
+        mock_tool.description = "Test tool"
+        mock_tool.run.return_value = ToolOutput(
+            tool_name="test_tool", result={}, confidence=0.5,
+            raw_text="test", metadata={},
+        )
+        mock_tool.unload = MagicMock()
+
+        registry = ToolRegistry()
+        registry.register(mock_tool)
+
+        registry.run_batch(["test_tool"], unload_after_run=False)
+        mock_tool.unload.assert_not_called()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ToolRegistry — DERMARBITER_DISABLE_TOOLS env var
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestToolRegistryDisableEnvVar:
+    """Tests for DERMARBITER_DISABLE_TOOLS environment variable."""
+
+    def test_disable_single_tool(self, mock_tool_registry: ToolRegistry, monkeypatch):
+        """A disabled tool should produce a 'disabled' output."""
+        monkeypatch.setenv("DERMARBITER_DISABLE_TOOLS", "panderm_classifier")
+        outputs = mock_tool_registry.run_batch(
+            tool_names=["panderm_classifier", "case_rag"],
+        )
+        assert len(outputs) == 2
+        assert outputs[0].tool_name == "panderm_classifier"
+        assert outputs[0].result.get("status") == "disabled"
+        assert outputs[0].confidence == 0.0
+        # case_rag should still work normally
+        assert outputs[1].tool_name == "case_rag"
+        assert outputs[1].confidence > 0.0
+
+    def test_disable_multiple_tools(self, mock_tool_registry: ToolRegistry, monkeypatch):
+        """Multiple tools can be disabled via comma separation."""
+        monkeypatch.setenv("DERMARBITER_DISABLE_TOOLS", "panderm_classifier,dermogpt_vqa")
+        outputs = mock_tool_registry.run_batch(
+            tool_names=["panderm_classifier", "dermogpt_vqa", "case_rag"],
+        )
+        assert len(outputs) == 3
+        assert outputs[0].result.get("status") == "disabled"
+        assert outputs[1].result.get("status") == "disabled"
+        assert outputs[2].confidence > 0.0
+
+    def test_disable_empty_string(self, mock_tool_registry: ToolRegistry, monkeypatch):
+        """Empty DERMARBITER_DISABLE_TOOLS should disable nothing."""
+        monkeypatch.setenv("DERMARBITER_DISABLE_TOOLS", "")
+        outputs = mock_tool_registry.run_batch(
+            tool_names=["panderm_classifier"],
+        )
+        assert outputs[0].confidence > 0.0
+
+    def test_disable_whitespace_handling(self, mock_tool_registry: ToolRegistry, monkeypatch):
+        """Whitespace around tool names should be stripped."""
+        monkeypatch.setenv("DERMARBITER_DISABLE_TOOLS", " panderm_classifier , case_rag ")
+        outputs = mock_tool_registry.run_batch(
+            tool_names=["panderm_classifier", "case_rag", "guideline_rag"],
+        )
+        assert outputs[0].result.get("status") == "disabled"
+        assert outputs[1].result.get("status") == "disabled"
+        assert outputs[2].confidence > 0.0
+
+    def test_no_env_var_disables_nothing(self, mock_tool_registry: ToolRegistry, monkeypatch):
+        """Without the env var, all tools should run."""
+        monkeypatch.delenv("DERMARBITER_DISABLE_TOOLS", raising=False)
+        outputs = mock_tool_registry.run_batch(
+            tool_names=["panderm_classifier"],
+        )
+        assert outputs[0].confidence > 0.0

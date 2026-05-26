@@ -13,6 +13,7 @@ and returns a ``ToolOutput``.
 from __future__ import annotations
 
 import logging
+import os
 from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Any
@@ -218,6 +219,7 @@ class ToolRegistry:
         tool_names: list[str],
         image_path: str | None = None,
         query: str = "",
+        unload_after_run: bool = True,
     ) -> list[ToolOutput]:
         """Execute multiple tools sequentially and collect outputs.
 
@@ -225,20 +227,67 @@ class ToolRegistry:
         is replaced with an error ``ToolOutput`` so the pipeline never
         crashes due to a single tool failure).
 
+        When ``unload_after_run`` is ``True`` (the default), each tool's
+        ``unload()`` method is called immediately after inference so GPU
+        VRAM is freed before loading the next heavy model.  This is
+        critical on T4 (16 GB) where loading all 9 tools concurrently
+        causes CUDA OOM.
+
+        Tool names listed in the ``DERMARBITER_DISABLE_TOOLS`` environment
+        variable (comma-separated) are silently skipped.  This supports
+        LOO ablation experiments (e.g. ``DERMARBITER_DISABLE_TOOLS=dermogpt_vqa``).
+
         Args:
-            tool_names:  List of tool names to run.
-            image_path:  Shared image path for all tools.
-            query:       Shared query string for all tools.
+            tool_names:      List of tool names to run.
+            image_path:      Shared image path for all tools.
+            query:           Shared query string for all tools.
+            unload_after_run: If True, call ``tool.unload()`` after each
+                             tool finishes to free GPU memory.
 
         Returns:
             List of ``ToolOutput`` instances (one per tool name).
         """
+        # Parse disabled tools from environment
+        disabled_raw = os.environ.get("DERMARBITER_DISABLE_TOOLS", "")
+        disabled_tools = {
+            t.strip() for t in disabled_raw.split(",") if t.strip()
+        }
+        if disabled_tools:
+            logger.info(
+                "DERMARBITER_DISABLE_TOOLS set — skipping: %s",
+                disabled_tools,
+            )
+
         outputs: list[ToolOutput] = []
         for name in tool_names:
+            # Skip disabled tools (LOO ablation support)
+            if name in disabled_tools:
+                logger.info("Tool %r disabled via env var, skipping.", name)
+                outputs.append(
+                    ToolOutput(
+                        tool_name=name,
+                        result={"status": "disabled"},
+                        confidence=0.0,
+                        raw_text=f"Tool {name} disabled via DERMARBITER_DISABLE_TOOLS.",
+                        metadata={"status": "disabled"},
+                    )
+                )
+                continue
+
             try:
                 tool = self.get(name)
                 output = tool.run(image_path=image_path, query=query)
                 outputs.append(output)
+
+                # Free GPU memory after each tool (VRAM-constrained envs)
+                if unload_after_run and hasattr(tool, "unload"):
+                    try:
+                        tool.unload()
+                        logger.debug("Unloaded tool %r to free GPU memory.", name)
+                    except Exception as unload_exc:
+                        logger.warning(
+                            "Failed to unload tool %r: %s", name, unload_exc
+                        )
             except Exception as exc:
                 logger.error("Tool %r failed: %s", name, exc, exc_info=True)
                 outputs.append(

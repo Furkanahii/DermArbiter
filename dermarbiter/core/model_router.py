@@ -3,8 +3,8 @@ DermArbiter Model Router — Multi-Backend LLM Dispatch
 
 Routes LLM calls to the appropriate backend based on per-agent configuration:
     • Google Gemini API  (via langchain_google_genai)
-    • Local HuggingFace  (placeholder — transformers / vLLM)
-    • Groq Cloud API     (placeholder — groq SDK)
+    • Local HuggingFace  (transformers with BitsAndBytes quantization)
+    • Groq Cloud API     (groq SDK)
 
 Includes automatic fallback: if the primary backend fails, the router
 retries on the next configured backend before raising.
@@ -13,6 +13,7 @@ retries on the next configured backend before raising.
 from __future__ import annotations
 
 import logging
+import os
 import time
 from enum import Enum
 from typing import Any, Optional
@@ -166,6 +167,13 @@ class ModelRouter:
         max_tok = max_tokens if max_tokens is not None else agent_cfg.max_output_tokens
         model = agent_cfg.model_name
 
+        # Forward local_hf-specific settings from agent config
+        local_kwargs: dict[str, Any] = {
+            "device": getattr(agent_cfg, "device", "cpu"),
+            "quantization": getattr(agent_cfg, "quantization", None),
+        }
+        local_kwargs.update(kwargs)
+
         # Try primary backend, then fallbacks
         errors: list[str] = []
         backends_to_try = [backend] + [
@@ -176,7 +184,7 @@ class ModelRouter:
             if be not in self._initialized_backends:
                 continue
             try:
-                return self._dispatch(be, messages, model, temp, max_tok, **kwargs)
+                return self._dispatch(be, messages, model, temp, max_tok, **local_kwargs)
             except Exception as exc:
                 msg = f"Backend {be.value} failed: {exc}"
                 logger.warning(msg)
@@ -281,7 +289,7 @@ class ModelRouter:
         return response.content if hasattr(response, "content") else str(response)
 
     # ------------------------------------------------------------------
-    # Local HuggingFace (placeholder)
+    # Local HuggingFace (Transformers)
     # ------------------------------------------------------------------
 
     def _call_local(
@@ -292,33 +300,117 @@ class ModelRouter:
         quantization: Optional[str] = None,
     ) -> str:
         """
-        Placeholder for local HuggingFace Transformers / vLLM inference.
+        Run inference on a local HuggingFace Transformers model.
 
-        In production this would:
-            1. Load or retrieve a cached ``AutoModelForCausalLM``.
-            2. Apply quantization (bitsandbytes 4-bit / 8-bit).
-            3. Tokenize the chat template.
-            4. Generate and decode.
+        Supports ``4bit`` and ``8bit`` quantization via bitsandbytes when
+        running on CUDA.  Models and tokenizers are cached in
+        ``_local_model_cache`` keyed by ``(model, quantization)`` so
+        subsequent calls skip the expensive load.
 
-        Raises:
-            NotImplementedError: Always, until a local model is configured.
+        Args:
+            messages: Chat-style ``[{"role": ..., "content": ...}]`` dicts.
+            model: HuggingFace model identifier (e.g. ``Qwen/Qwen3-8B-Instruct``).
+            device: Target device (``"cpu"`` or ``"cuda"``).
+            quantization: ``"4bit"`` / ``"8bit"`` / ``None``.
+
+        Returns:
+            The generated response text.
         """
-        logger.warning(
-            "Local HF inference requested (model=%s, device=%s, quant=%s) "
-            "but the backend is not yet implemented.",
-            model,
-            device,
-            quantization,
-        )
-        raise NotImplementedError(
-            f"Local HuggingFace inference is not yet implemented. "
-            f"Model={model}, device={device}, quantization={quantization}. "
-            f"Please configure a remote backend (google_api or groq_api) "
-            f"or implement _call_local()."
-        )
+        import torch
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+
+        cache_key = f"{model}:{quantization}"
+
+        # Lazily initialize the model cache
+        if not hasattr(self, "_local_model_cache"):
+            self._local_model_cache: dict[str, tuple[Any, Any]] = {}
+
+        if cache_key not in self._local_model_cache:
+            logger.info(
+                "Loading local model %s (device=%s, quant=%s) ...",
+                model, device, quantization,
+            )
+            hf_token = os.environ.get("HF_TOKEN")
+
+            load_kwargs: dict[str, Any] = {
+                "trust_remote_code": True,
+                "torch_dtype": torch.float16,
+                "token": hf_token,
+            }
+
+            if quantization in ("4bit", "4") and device != "cpu":
+                from transformers import BitsAndBytesConfig
+                load_kwargs["quantization_config"] = BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_compute_dtype=torch.float16,
+                    bnb_4bit_use_double_quant=True,
+                    bnb_4bit_quant_type="nf4",
+                )
+                load_kwargs["device_map"] = "auto"
+            elif quantization in ("8bit", "8") and device != "cpu":
+                from transformers import BitsAndBytesConfig
+                load_kwargs["quantization_config"] = BitsAndBytesConfig(
+                    load_in_8bit=True,
+                )
+                load_kwargs["device_map"] = "auto"
+            else:
+                load_kwargs["device_map"] = "auto" if device == "cuda" else {"": device}
+
+            tokenizer = AutoTokenizer.from_pretrained(
+                model,
+                trust_remote_code=True,
+                token=hf_token,
+            )
+            lm = AutoModelForCausalLM.from_pretrained(model, **load_kwargs)
+            lm.eval()
+            self._local_model_cache[cache_key] = (tokenizer, lm)
+            logger.info("Local model %s loaded successfully.", model)
+
+        tokenizer, lm = self._local_model_cache[cache_key]
+
+        # Apply chat template (most modern models support this)
+        try:
+            prompt = tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+        except Exception:
+            # Fallback: manual concatenation if no chat template defined
+            prompt = ""
+            for msg in messages:
+                role = msg.get("role", "user")
+                content = msg.get("content", "")
+                prompt += f"<|{role}|>\n{content}\n"
+            prompt += "<|assistant|>\n"
+
+        inputs = tokenizer(prompt, return_tensors="pt")
+        input_len = inputs["input_ids"].shape[-1]
+
+        # Move inputs to model device
+        model_device = next(lm.parameters()).device
+        inputs = {k: v.to(model_device) for k, v in inputs.items()}
+
+        start = time.monotonic()
+        with torch.inference_mode():
+            output_ids = lm.generate(
+                **inputs,
+                max_new_tokens=4096,
+                do_sample=False,
+            )
+        elapsed = time.monotonic() - start
+        logger.debug("Local inference (%s) completed in %.2fs", model, elapsed)
+
+        # Decode only the generated tokens (skip the prompt)
+        answer = tokenizer.decode(
+            output_ids[0][input_len:],
+            skip_special_tokens=True,
+        ).strip()
+
+        return answer
 
     # ------------------------------------------------------------------
-    # Groq Cloud (placeholder)
+    # Groq Cloud API
     # ------------------------------------------------------------------
 
     def _call_groq(
@@ -329,23 +421,38 @@ class ModelRouter:
         max_tokens: int = 4096,
     ) -> str:
         """
-        Placeholder for Groq Cloud API inference.
+        Call the Groq Cloud API for fast inference on hosted open-source models.
 
-        In production this would:
-            1. Initialize the ``groq.Groq`` client with the API key.
-            2. Call ``client.chat.completions.create()``.
-            3. Return the first choice's message content.
+        Uses the ``groq`` Python SDK to call ``chat.completions.create()``.
+        Requires ``GROQ_API_KEY`` to be set in the environment or config.
 
-        Raises:
-            NotImplementedError: Always, until Groq integration is wired up.
+        Args:
+            messages: Chat-style ``[{"role": ..., "content": ...}]`` dicts.
+            model: Groq model identifier (e.g. ``llama-3.3-70b-versatile``).
+            temperature: Sampling temperature.
+            max_tokens: Maximum tokens to generate.
+
+        Returns:
+            The LLM's response text.
         """
-        logger.warning(
-            "Groq API inference requested (model=%s) but the backend is "
-            "not yet implemented.",
-            model,
+        import groq as groq_sdk
+
+        if not hasattr(self, "_groq_client"):
+            self._groq_client = groq_sdk.Groq(
+                api_key=self._config.groq_api_key,
+            )
+
+        start = time.monotonic()
+        response = self._groq_client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
         )
-        raise NotImplementedError(
-            f"Groq Cloud inference is not yet implemented. "
-            f"Model={model}. Install the 'groq' package and set GROQ_API_KEY, "
-            f"then implement _call_groq()."
+        elapsed = time.monotonic() - start
+        logger.debug(
+            "Groq call (%s, T=%.2f) completed in %.2fs",
+            model, temperature, elapsed,
         )
+
+        return response.choices[0].message.content

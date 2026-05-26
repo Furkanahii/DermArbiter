@@ -33,6 +33,8 @@ from pydantic import BaseModel, Field, field_validator
 class AgentConfig(BaseModel):
     """Configuration for a single agent in the panel."""
 
+    model_config = {"extra": "ignore"}
+
     role: str = Field(
         ...,
         description="Agent role identifier (specialist, generalist, skeptic, moderator).",
@@ -68,6 +70,14 @@ class AgentConfig(BaseModel):
         default_factory=list,
         description="Whitelist of tool names this agent may invoke. "
                     "Empty means 'all registered tools' (if has_tool_access=True).",
+    )
+    device: str = Field(
+        default="cpu",
+        description="Target device for local_hf backend ('cpu', 'cuda', 'auto').",
+    )
+    quantization: Optional[str] = Field(
+        default=None,
+        description="Quantization mode for local_hf backend ('4bit', '8bit', or None).",
     )
     extra: dict[str, Any] = Field(
         default_factory=dict,
@@ -322,13 +332,31 @@ def load_config(config_dir: str) -> DermArbiterConfig:
                 if isinstance(content, dict):
                     _deep_merge(merged, content)
 
-    # --- Transform agents list → dict keyed by role ---
+    # --- Transform agents (list or dict) → dict keyed by role ---
     if "agents" in merged and isinstance(merged["agents"], list):
         agents_dict: dict[str, Any] = {}
         for agent_data in merged["agents"]:
             if isinstance(agent_data, dict) and "role" in agent_data:
                 agents_dict[agent_data["role"]] = agent_data
         merged["agents"] = agents_dict
+
+    # --- Normalize agent YAML shorthand → Pydantic field names ---
+    _AGENT_FIELD_ALIASES = {
+        "model": "model_name",
+        "backend": "model_backend",
+        "max_tokens": "max_output_tokens",
+        "system_prompt_key": "system_prompt_path",
+    }
+    if "agents" in merged and isinstance(merged["agents"], dict):
+        for role, agent_data in merged["agents"].items():
+            if not isinstance(agent_data, dict):
+                continue
+            # Ensure role is set
+            agent_data.setdefault("role", role)
+            # Map shorthand keys to canonical Pydantic field names
+            for short, canonical in _AGENT_FIELD_ALIASES.items():
+                if short in agent_data and canonical not in agent_data:
+                    agent_data[canonical] = agent_data.pop(short)
 
     # --- Transform tools list → dict keyed by name ---
     if "tools" in merged and isinstance(merged["tools"], list):

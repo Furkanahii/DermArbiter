@@ -108,6 +108,12 @@ def _make_fake_vqa_loaded(tool: DermoGPTVQA | MedGemmaVQA) -> None:
             )
 
         def apply_chat_template(self, messages, tokenize=False, **kw):
+            # New MedGemma code uses tokenize=True, return_dict=True
+            # and expects a dict-like BatchEncoding, not a string.
+            if tokenize:
+                return FakeBatchEncoding(
+                    input_ids=torch.tensor([[1, 2, 3]]),
+                )
             return "User: test query"
 
     class FakeModel(nn.Module):

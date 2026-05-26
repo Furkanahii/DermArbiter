@@ -559,6 +559,11 @@ class ModelRouter:
         "text": …}]`` shape the processor's apply_chat_template wants.
         No image is attached — the model still produces the assistant
         turn from the textual context.
+
+        Critically, Gemma3 family (incl. MedGemma-4B-it) emits NaN logits
+        when loaded in float16 — the official HF example uses bfloat16.
+        We override torch_dtype here regardless of what the text path
+        prefers, otherwise generate() returns 0 new tokens silently.
         """
         import torch
         from transformers import AutoProcessor
@@ -571,6 +576,13 @@ class ModelRouter:
                 model, device, quantization,
             )
             load_kwargs = self._local_load_kwargs(device, quantization, hf_token)
+            # Force bfloat16 for multimodal models — float16 produces NaN
+            # logits on Gemma3 / MedGemma and silently yields empty output.
+            load_kwargs["torch_dtype"] = torch.bfloat16
+            if "quantization_config" in load_kwargs:
+                # bnb 4-bit compute dtype must match the model dtype to
+                # avoid the same NaN issue at the quantized-matmul boundary.
+                load_kwargs["quantization_config"].bnb_4bit_compute_dtype = torch.bfloat16
 
             # Try ImageTextToText (newest API) → Vision2Seq → CausalLM.
             lm = None
@@ -639,14 +651,36 @@ class ModelRouter:
         }
 
         input_len = inputs["input_ids"].shape[-1]
+
+        # Generation config: smaller cap (1024 is more than enough for the
+        # AgentBrief schema), explicit pad/eos so the model doesn't see
+        # `pad_token_id is None` and bail out, and min_new_tokens guards
+        # against a degenerate first-step EOS.
+        tokenizer = getattr(processor, "tokenizer", None) or processor
+        pad_id = getattr(tokenizer, "pad_token_id", None)
+        eos_id = getattr(tokenizer, "eos_token_id", None)
+        if pad_id is None and eos_id is not None:
+            pad_id = eos_id
+
+        gen_kwargs: dict[str, Any] = {
+            "max_new_tokens": 1024,
+            "min_new_tokens": 16,
+            "do_sample": False,
+        }
+        if pad_id is not None:
+            gen_kwargs["pad_token_id"] = pad_id
+        if eos_id is not None:
+            gen_kwargs["eos_token_id"] = eos_id
+
         start = time.monotonic()
         with torch.inference_mode():
-            output_ids = lm.generate(
-                **inputs, max_new_tokens=4096, do_sample=False,
-            )
+            output_ids = lm.generate(**inputs, **gen_kwargs)
         elapsed = time.monotonic() - start
-        logger.debug("Local MULTIMODAL inference (%s) completed in %.2fs",
-                     model, elapsed)
+        new_token_count = output_ids.shape[-1] - input_len
+        logger.info(
+            "Local MULTIMODAL inference (%s) → %d new tokens in %.2fs",
+            model, new_token_count, elapsed,
+        )
 
         # processor exposes .decode in newer transformers; fall back to
         # the underlying tokenizer otherwise.

@@ -374,6 +374,41 @@ class ModelRouter:
     # Local HuggingFace (Transformers)
     # ------------------------------------------------------------------
 
+    # Model-type registry — `model_type` strings reported by AutoConfig for
+    # multimodal architectures we want to route through the image-text-to-text
+    # API. Detection is primarily via ``hasattr(cfg, "vision_config")`` so
+    # this list is a backstop only.
+    _MULTIMODAL_MODEL_TYPES = frozenset({
+        "gemma3", "gemma3_text",
+        "qwen2_vl", "qwen2_5_vl", "qwen3_vl",
+        "llava", "llava_next", "llava_onevision",
+        "idefics", "idefics2", "idefics3",
+        "internvl_chat", "phi3_v", "fuyu", "molmo", "paligemma",
+    })
+
+    def _is_multimodal(self, model: str, hf_token: Optional[str]) -> bool:
+        """Decide whether ``model`` should be loaded as image-text-to-text.
+
+        Prefers a generic structural check (``cfg.vision_config`` present)
+        so future multimodal architectures Just Work; falls back to a
+        registry of known model_type strings.
+        """
+        try:
+            from transformers import AutoConfig
+            cfg = AutoConfig.from_pretrained(
+                model, trust_remote_code=True, token=hf_token,
+            )
+        except Exception as exc:
+            logger.warning(
+                "AutoConfig probe failed for %s — assuming text-only. (%s)",
+                model, exc,
+            )
+            return False
+
+        if hasattr(cfg, "vision_config") and cfg.vision_config is not None:
+            return True
+        return getattr(cfg, "model_type", "") in self._MULTIMODAL_MODEL_TYPES
+
     def _call_local(
         self,
         messages: list[dict[str, str]],
@@ -381,84 +416,104 @@ class ModelRouter:
         device: str = "cpu",
         quantization: Optional[str] = None,
     ) -> str:
-        """
-        Run inference on a local HuggingFace Transformers model.
+        """Run inference on a local HuggingFace Transformers model.
 
-        Supports ``4bit`` and ``8bit`` quantization via bitsandbytes when
-        running on CUDA.  Models and tokenizers are cached in
-        ``_local_model_cache`` keyed by ``(model, quantization)`` so
-        subsequent calls skip the expensive load.
+        Auto-detects multimodal models (e.g. MedGemma-4B-it / Gemma3,
+        Qwen-VL family) and routes them to the image-text-to-text API
+        which respects the multimodal chat template. Text-only models
+        (Qwen3-8B, Llama, etc.) keep the existing AutoModelForCausalLM
+        path. Both paths cache by ``(model, quantization, kind)`` so
+        the heavy load happens only once per agent.
 
         Args:
             messages: Chat-style ``[{"role": ..., "content": ...}]`` dicts.
-            model: HuggingFace model identifier (e.g. ``Qwen/Qwen3-8B-Instruct``).
-            device: Target device (``"cpu"`` or ``"cuda"``).
+            model: HuggingFace model identifier.
+            device: ``"cpu"`` / ``"cuda"`` / ``"auto"``.
             quantization: ``"4bit"`` / ``"8bit"`` / ``None``.
-
-        Returns:
-            The generated response text.
         """
-        import torch
-        from transformers import AutoModelForCausalLM, AutoTokenizer
-
-        cache_key = f"{model}:{quantization}"
-
         # Lazily initialize the model cache
         if not hasattr(self, "_local_model_cache"):
             self._local_model_cache: dict[str, tuple[Any, Any]] = {}
 
+        hf_token = os.environ.get("HF_TOKEN")
+
+        if self._is_multimodal(model, hf_token):
+            return self._call_local_multimodal(
+                messages, model, device, quantization, hf_token,
+            )
+        return self._call_local_text(
+            messages, model, device, quantization, hf_token,
+        )
+
+    # ----- shared bnb config -----
+
+    def _local_load_kwargs(
+        self, device: str, quantization: Optional[str], hf_token: Optional[str],
+    ) -> dict[str, Any]:
+        """Common ``from_pretrained(**kwargs)`` for text + multimodal paths."""
+        import torch
+
+        kwargs: dict[str, Any] = {
+            "trust_remote_code": True,
+            "torch_dtype": torch.float16,
+            "token": hf_token,
+        }
+        if quantization in ("4bit", "4") and device != "cpu":
+            from transformers import BitsAndBytesConfig
+            kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_compute_dtype=torch.float16,
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_quant_type="nf4",
+            )
+            kwargs["device_map"] = "auto"
+        elif quantization in ("8bit", "8") and device != "cpu":
+            from transformers import BitsAndBytesConfig
+            kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
+            kwargs["device_map"] = "auto"
+        else:
+            kwargs["device_map"] = "auto" if device == "cuda" else {"": device}
+        return kwargs
+
+    # ----- text-only path (Qwen3-8B, Llama, …) -----
+
+    def _call_local_text(
+        self,
+        messages: list[dict[str, str]],
+        model: str,
+        device: str,
+        quantization: Optional[str],
+        hf_token: Optional[str],
+    ) -> str:
+        import torch
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+
+        cache_key = f"{model}:{quantization}:text"
+
         if cache_key not in self._local_model_cache:
             logger.info(
-                "Loading local model %s (device=%s, quant=%s) ...",
+                "Loading local TEXT model %s (device=%s, quant=%s)…",
                 model, device, quantization,
             )
-            hf_token = os.environ.get("HF_TOKEN")
-
-            load_kwargs: dict[str, Any] = {
-                "trust_remote_code": True,
-                "torch_dtype": torch.float16,
-                "token": hf_token,
-            }
-
-            if quantization in ("4bit", "4") and device != "cpu":
-                from transformers import BitsAndBytesConfig
-                load_kwargs["quantization_config"] = BitsAndBytesConfig(
-                    load_in_4bit=True,
-                    bnb_4bit_compute_dtype=torch.float16,
-                    bnb_4bit_use_double_quant=True,
-                    bnb_4bit_quant_type="nf4",
-                )
-                load_kwargs["device_map"] = "auto"
-            elif quantization in ("8bit", "8") and device != "cpu":
-                from transformers import BitsAndBytesConfig
-                load_kwargs["quantization_config"] = BitsAndBytesConfig(
-                    load_in_8bit=True,
-                )
-                load_kwargs["device_map"] = "auto"
-            else:
-                load_kwargs["device_map"] = "auto" if device == "cuda" else {"": device}
-
             tokenizer = AutoTokenizer.from_pretrained(
-                model,
-                trust_remote_code=True,
-                token=hf_token,
+                model, trust_remote_code=True, token=hf_token,
             )
-            lm = AutoModelForCausalLM.from_pretrained(model, **load_kwargs)
+            lm = AutoModelForCausalLM.from_pretrained(
+                model, **self._local_load_kwargs(device, quantization, hf_token),
+            )
             lm.eval()
             self._local_model_cache[cache_key] = (tokenizer, lm)
-            logger.info("Local model %s loaded successfully.", model)
+            logger.info("Local TEXT model %s loaded.", model)
 
         tokenizer, lm = self._local_model_cache[cache_key]
 
-        # Apply chat template (most modern models support this)
+        # Apply chat template (most modern models ship one).
         try:
             prompt = tokenizer.apply_chat_template(
-                messages,
-                tokenize=False,
-                add_generation_prompt=True,
+                messages, tokenize=False, add_generation_prompt=True,
             )
         except Exception:
-            # Fallback: manual concatenation if no chat template defined
+            # Fallback: rudimentary <|role|> concatenation.
             prompt = ""
             for msg in messages:
                 role = msg.get("role", "user")
@@ -468,28 +523,137 @@ class ModelRouter:
 
         inputs = tokenizer(prompt, return_tensors="pt")
         input_len = inputs["input_ids"].shape[-1]
-
-        # Move inputs to model device
         model_device = next(lm.parameters()).device
         inputs = {k: v.to(model_device) for k, v in inputs.items()}
 
         start = time.monotonic()
         with torch.inference_mode():
             output_ids = lm.generate(
-                **inputs,
-                max_new_tokens=4096,
-                do_sample=False,
+                **inputs, max_new_tokens=4096, do_sample=False,
             )
         elapsed = time.monotonic() - start
-        logger.debug("Local inference (%s) completed in %.2fs", model, elapsed)
+        logger.debug("Local TEXT inference (%s) completed in %.2fs",
+                     model, elapsed)
 
-        # Decode only the generated tokens (skip the prompt)
-        answer = tokenizer.decode(
-            output_ids[0][input_len:],
-            skip_special_tokens=True,
+        return tokenizer.decode(
+            output_ids[0][input_len:], skip_special_tokens=True,
         ).strip()
 
-        return answer
+    # ----- multimodal path (MedGemma-4B / Gemma3, Qwen-VL, Llava, …) -----
+
+    def _call_local_multimodal(
+        self,
+        messages: list[dict[str, str]],
+        model: str,
+        device: str,
+        quantization: Optional[str],
+        hf_token: Optional[str],
+    ) -> str:
+        """Text-only invocation of a multimodal model.
+
+        The plain ``AutoModelForCausalLM`` path produces empty output on
+        Gemma3-style architectures because the model's chat template
+        expects vision tokens to be reachable through the processor.
+        We instead use ``AutoModelForImageTextToText`` (or its older
+        Vision2Seq alias) and feed messages in the ``[{"type": "text",
+        "text": …}]`` shape the processor's apply_chat_template wants.
+        No image is attached — the model still produces the assistant
+        turn from the textual context.
+        """
+        import torch
+        from transformers import AutoProcessor
+
+        cache_key = f"{model}:{quantization}:mm"
+
+        if cache_key not in self._local_model_cache:
+            logger.info(
+                "Loading local MULTIMODAL model %s (device=%s, quant=%s)…",
+                model, device, quantization,
+            )
+            load_kwargs = self._local_load_kwargs(device, quantization, hf_token)
+
+            # Try ImageTextToText (newest API) → Vision2Seq → CausalLM.
+            lm = None
+            last_err: Exception | None = None
+            for AutoClsName in ("AutoModelForImageTextToText",
+                                "AutoModelForVision2Seq",
+                                "AutoModelForCausalLM"):
+                try:
+                    import transformers as _t
+                    AutoCls = getattr(_t, AutoClsName)
+                    lm = AutoCls.from_pretrained(model, **load_kwargs)
+                    logger.info("Loaded %s via %s", model, AutoClsName)
+                    break
+                except (AttributeError, ValueError) as exc:
+                    last_err = exc
+                    continue
+            if lm is None:
+                raise RuntimeError(
+                    f"Could not load {model} with any AutoModel class. "
+                    f"Last error: {last_err}"
+                )
+
+            processor = AutoProcessor.from_pretrained(
+                model, trust_remote_code=True, token=hf_token,
+            )
+            lm.eval()
+            self._local_model_cache[cache_key] = (processor, lm)
+            logger.info("Local MULTIMODAL model %s loaded.", model)
+
+        processor, lm = self._local_model_cache[cache_key]
+
+        # Re-shape dict messages into the multimodal content format the
+        # multimodal processors expect. We only attach text — no image.
+        mm_messages: list[dict[str, Any]] = []
+        for msg in messages:
+            mm_messages.append({
+                "role": msg.get("role", "user"),
+                "content": [{"type": "text", "text": msg.get("content", "")}],
+            })
+
+        # Tokenize inline; same one-shot pattern as medgemma_tool.py.
+        try:
+            inputs = processor.apply_chat_template(
+                mm_messages,
+                add_generation_prompt=True,
+                tokenize=True,
+                return_dict=True,
+                return_tensors="pt",
+            )
+        except Exception as exc:
+            # Some older processors expose this only on .tokenizer; try that.
+            logger.warning(
+                "processor.apply_chat_template failed for %s (%s) — "
+                "falling back to tokenizer.apply_chat_template",
+                model, exc,
+            )
+            prompt = processor.tokenizer.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=True,
+            )
+            inputs = processor.tokenizer(prompt, return_tensors="pt")
+
+        model_device = next(lm.parameters()).device
+        inputs = {
+            k: v.to(model_device) if hasattr(v, "to") else v
+            for k, v in inputs.items()
+        }
+
+        input_len = inputs["input_ids"].shape[-1]
+        start = time.monotonic()
+        with torch.inference_mode():
+            output_ids = lm.generate(
+                **inputs, max_new_tokens=4096, do_sample=False,
+            )
+        elapsed = time.monotonic() - start
+        logger.debug("Local MULTIMODAL inference (%s) completed in %.2fs",
+                     model, elapsed)
+
+        # processor exposes .decode in newer transformers; fall back to
+        # the underlying tokenizer otherwise.
+        decode = getattr(processor, "decode", None) or processor.tokenizer.decode
+        return decode(
+            output_ids[0][input_len:], skip_special_tokens=True,
+        ).strip()
 
     # ------------------------------------------------------------------
     # Groq Cloud API

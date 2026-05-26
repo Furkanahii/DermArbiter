@@ -326,22 +326,25 @@ class ModelRouter:
         from langchain_google_genai import ChatGoogleGenerativeAI
         from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 
-        cache_key = f"{model}:{temperature}:{int(json_mode)}"
+        cache_key = f"{model}:{temperature}"
         if cache_key not in self._gemini_llm_cache:
-            init_kwargs: dict[str, Any] = {
-                "model": model,
-                "google_api_key": self._config.google_api_key,
-                "temperature": temperature,
-                "max_output_tokens": max_tokens,
-            }
-            if json_mode:
-                # langchain_google_genai forwards model_kwargs to the
-                # underlying google-generativeai client's generation_config.
-                init_kwargs["model_kwargs"] = {
-                    "response_mime_type": "application/json",
-                }
-            self._gemini_llm_cache[cache_key] = ChatGoogleGenerativeAI(**init_kwargs)
+            self._gemini_llm_cache[cache_key] = ChatGoogleGenerativeAI(
+                model=model,
+                google_api_key=self._config.google_api_key,
+                temperature=temperature,
+                max_output_tokens=max_tokens,
+            )
         llm = self._gemini_llm_cache[cache_key]
+
+        # JSON mode: bind per-call instead of via model_kwargs (which langchain
+        # warns about and silently routes to an inapplicable slot). The .bind()
+        # path sets generation_config.response_mime_type on the actual
+        # google-generativeai request — verified by langchain_google_genai's
+        # _generate() path. Effect: Gemini's API is *required* to emit a JSON
+        # payload (no markdown fences, no preamble), so extract_json never has
+        # to guess.
+        if json_mode:
+            llm = llm.bind(response_mime_type="application/json")
 
         # Convert dict messages → LangChain message objects
         lc_messages = []

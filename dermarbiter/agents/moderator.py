@@ -162,12 +162,12 @@ class ModeratorAgent(BaseAgent):
 
             logger.warning(
                 "[%s] LLM JSON response missing required keys. "
-                "Parsed keys: %s | raw_response[:300]: %r",
-                self.role, list(parsed.keys()), raw_response[:300],
+                "Parsed keys: %s | raw_response[:800]: %r",
+                self.role, list(parsed.keys()), raw_response[:800],
             )
         except Exception as exc:
             logger.error(
-                "[%s] Brief generation failed: %s | raw_response[:300]: %r",
+                "[%s] Brief generation failed: %s | raw_response[:800]: %r",
                 self.role, exc, locals().get("raw_response", "")[:300],
             )
 

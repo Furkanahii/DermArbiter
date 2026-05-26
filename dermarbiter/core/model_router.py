@@ -223,8 +223,10 @@ class ModelRouter:
         max_tokens: int,
         **kwargs: Any,
     ) -> str:
+        json_mode = bool(kwargs.get("json_mode", False))
         if backend == ModelBackend.GOOGLE_API:
-            return self._call_gemini(messages, model, temperature, max_tokens)
+            return self._call_gemini(messages, model, temperature, max_tokens,
+                                      json_mode=json_mode)
         elif backend == ModelBackend.LOCAL_HF:
             device = kwargs.get("device", "cpu")
             quantization = kwargs.get("quantization")
@@ -244,24 +246,36 @@ class ModelRouter:
         model: str,
         temperature: float,
         max_tokens: int = 4096,
+        json_mode: bool = False,
     ) -> str:
         """
         Call Google Gemini via ``langchain_google_genai.ChatGoogleGenerativeAI``.
 
-        Caches the LLM object per (model, temperature) to avoid repeated
-        initialization overhead.
+        Caches the LLM object per (model, temperature, json_mode) to avoid
+        repeated initialization overhead. ``json_mode=True`` sets
+        ``response_mime_type='application/json'`` on the Gemini request so
+        the model is required to emit a parseable JSON payload (no
+        markdown commentary, no fenced code blocks) — the agent brief
+        path uses this so extract_json() never has to guess.
         """
         from langchain_google_genai import ChatGoogleGenerativeAI
         from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 
-        cache_key = f"{model}:{temperature}"
+        cache_key = f"{model}:{temperature}:{int(json_mode)}"
         if cache_key not in self._gemini_llm_cache:
-            self._gemini_llm_cache[cache_key] = ChatGoogleGenerativeAI(
-                model=model,
-                google_api_key=self._config.google_api_key,
-                temperature=temperature,
-                max_output_tokens=max_tokens,
-            )
+            init_kwargs: dict[str, Any] = {
+                "model": model,
+                "google_api_key": self._config.google_api_key,
+                "temperature": temperature,
+                "max_output_tokens": max_tokens,
+            }
+            if json_mode:
+                # langchain_google_genai forwards model_kwargs to the
+                # underlying google-generativeai client's generation_config.
+                init_kwargs["model_kwargs"] = {
+                    "response_mime_type": "application/json",
+                }
+            self._gemini_llm_cache[cache_key] = ChatGoogleGenerativeAI(**init_kwargs)
         llm = self._gemini_llm_cache[cache_key]
 
         # Convert dict messages → LangChain message objects

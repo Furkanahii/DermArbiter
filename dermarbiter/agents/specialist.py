@@ -125,7 +125,7 @@ class SpecialistAgent(BaseAgent):
         messages = [{"role": "user", "content": prompt}]
 
         try:
-            raw_response = self._call_llm(messages)
+            raw_response = self._call_llm(messages, json_mode=True)
             parsed = extract_json(raw_response)
 
             if parsed and "top3_differential" in parsed:
@@ -143,16 +143,16 @@ class SpecialistAgent(BaseAgent):
                     disagreement_flags=parsed.get("disagreement_flags", []),
                 )
 
-            # JSON parsed but missing expected keys
+            # JSON parsed but missing expected keys — log raw output too.
             logger.warning(
                 "[%s] LLM JSON response missing required keys. "
-                "Parsed keys: %s",
-                self.role,
-                list(parsed.keys()),
+                "Parsed keys: %s | raw_response[:300]: %r",
+                self.role, list(parsed.keys()), raw_response[:300],
             )
         except Exception as exc:
             logger.error(
-                "[%s] Brief generation failed: %s", self.role, exc,
+                "[%s] Brief generation failed: %s | raw_response[:300]: %r",
+                self.role, exc, locals().get("raw_response", "")[:300],
             )
 
         # Fallback brief

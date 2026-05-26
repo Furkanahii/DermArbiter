@@ -23,33 +23,128 @@ _CHARS_PER_TOKEN: float = 3.8
 # JSON extraction
 # ---------------------------------------------------------------------------
 
+def _try_parse(candidate: str) -> dict[str, Any] | None:
+    """json.loads with one retry that escapes literal newlines inside strings.
+
+    Gemini occasionally emits JSON like::
+
+        {"reasoning": "The lesion shows...
+        It is consistent with..."}
+
+    which is invalid JSON (unescaped newline inside the string value).
+    The retry escapes raw newlines/tabs that appear *between* quotes,
+    leaving structural whitespace alone.
+    """
+    candidate = candidate.strip()
+    if not candidate:
+        return None
+    try:
+        result = json.loads(candidate)
+        return result if isinstance(result, dict) else None
+    except json.JSONDecodeError:
+        pass
+
+    # Escape literal newlines/tabs that fall inside string values.
+    in_string = False
+    escape = False
+    fixed_chars: list[str] = []
+    for ch in candidate:
+        if escape:
+            fixed_chars.append(ch)
+            escape = False
+            continue
+        if ch == "\\":
+            fixed_chars.append(ch)
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            fixed_chars.append(ch)
+            continue
+        if in_string and ch == "\n":
+            fixed_chars.append("\\n")
+        elif in_string and ch == "\t":
+            fixed_chars.append("\\t")
+        elif in_string and ch == "\r":
+            fixed_chars.append("\\r")
+        else:
+            fixed_chars.append(ch)
+    try:
+        result = json.loads("".join(fixed_chars))
+        return result if isinstance(result, dict) else None
+    except json.JSONDecodeError:
+        return None
+
+
+def _find_balanced_braces(text: str) -> str | None:
+    """Return the substring spanning the first ``{`` and its matching ``}``.
+
+    Walks the text once, counts brace depth (skipping braces inside string
+    literals), and returns the well-balanced span. Beats the greedy
+    ``{.*}`` regex when the response has multiple JSON objects or a
+    trailing markdown explanation.
+    """
+    start = text.find("{")
+    if start == -1:
+        return None
+    depth = 0
+    in_string = False
+    escape = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if escape:
+            escape = False
+            continue
+        if ch == "\\":
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    return None
+
+
 def extract_json(text: str) -> dict[str, Any]:
     """Best-effort extraction of a JSON object from free-form LLM output.
 
-    Strategy:
-        1. Look for a fenced ``json`` code block (```json ... ```).
-        2. Fall back to the first ``{ ... }`` substring.
-        3. Return an empty dict if nothing parseable is found.
+    Strategy (each step retries with newline-escape on JSONDecodeError):
+        1. Fenced ```json ... ``` code block.
+        2. Fenced ``` ... ``` block (no language tag) — Gemini sometimes
+           omits the ``json`` after the opening fence.
+        3. First balanced ``{ ... }`` span found by brace-counting.
 
-    Args:
-        text: Raw LLM response text.
-
-    Returns:
-        Parsed dict, or ``{}`` on failure.
+    Returns the parsed dict, or ``{}`` if every strategy fails. When
+    extraction fails the caller is expected to log ``text[:300]`` at
+    WARNING level so we can see what the model actually returned.
     """
-    fence_match = re.search(r"```json\s*\n?(.*?)\n?\s*```", text, re.DOTALL)
-    if fence_match:
-        try:
-            return json.loads(fence_match.group(1))
-        except json.JSONDecodeError:
-            pass
+    # 1. Fenced ```json ... ``` block.
+    fence_json = re.search(r"```json\s*\n?(.*?)\n?\s*```", text, re.DOTALL)
+    if fence_json:
+        parsed = _try_parse(fence_json.group(1))
+        if parsed is not None:
+            return parsed
 
-    brace_match = re.search(r"\{.*\}", text, re.DOTALL)
-    if brace_match:
-        try:
-            return json.loads(brace_match.group(0))
-        except json.JSONDecodeError:
-            pass
+    # 2. Fenced ``` ... ``` block (no language tag).
+    fence_any = re.search(r"```\s*\n?(.*?)\n?\s*```", text, re.DOTALL)
+    if fence_any:
+        parsed = _try_parse(fence_any.group(1))
+        if parsed is not None:
+            return parsed
+
+    # 3. First balanced { ... } span.
+    balanced = _find_balanced_braces(text)
+    if balanced:
+        parsed = _try_parse(balanced)
+        if parsed is not None:
+            return parsed
 
     return {}
 

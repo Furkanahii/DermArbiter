@@ -197,6 +197,7 @@ class BaseAgent(ABC):
         *,
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
+        json_mode: bool = False,
     ) -> str:
         """
         Send a chat-completion request through the ``ModelRouter``.
@@ -208,6 +209,10 @@ class BaseAgent(ABC):
             messages: List of ``{"role": "...", "content": "..."}`` dicts.
             temperature: Optional temperature override.
             max_tokens: Optional max-token override.
+            json_mode: When True, ask the backend to emit only a JSON
+                payload (Gemini sets ``response_mime_type=application/json``;
+                local/Groq backends ignore it). Used by brief-generation
+                paths that feed extract_json() downstream.
 
         Returns:
             The LLM response text.
@@ -224,6 +229,7 @@ class BaseAgent(ABC):
             messages=messages,
             temperature=temperature,
             max_tokens=max_tokens,
+            json_mode=json_mode,
         )
 
     def _load_system_prompt(self, prompt_path: str) -> str:

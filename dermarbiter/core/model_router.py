@@ -501,15 +501,33 @@ class ModelRouter:
     ) -> dict[str, Any]:
         """Common ``from_pretrained(**kwargs)`` for text + multimodal paths.
 
-        Sets ``llm_int8_enable_fp32_cpu_offload=True`` on bitsandbytes so
-        when the quantized model can't fit purely on T4 VRAM, the
-        remaining layers spill to CPU in fp32 instead of erroring out.
-        Inference is slower for the offloaded layers but the model loads
-        and runs to completion — far better than failing into the
-        fallback chain (which fed local model IDs to Gemini API and got
-        404s for ``Qwen/Qwen3-8B`` and ``google/medgemma-4b-it``).
+        CPU offload tradeoff: enabling ``llm_int8_enable_fp32_cpu_offload``
+        let the T4 (16 GB) load models that didn't fit purely on GPU, but
+        the offloaded layers ran 5-10× slower on CPU — a 50-case test
+        averaged 50 min/case instead of the expected 3 min. With A100
+        (40 GB) or L4 (24 GB) there's no need for CPU spill; the model
+        fits entirely on GPU and inference is fast. We auto-detect: if
+        usable VRAM ≥ 20 GB, keep everything on GPU. If less, fall back
+        to CPU offload as a last resort — but the cross-backend fallback
+        chain in ``call()`` will route to Gemini before that path is
+        exercised on cramped GPUs.
         """
         import torch
+
+        # Detect available GPU VRAM (header decides offload policy).
+        offload_to_cpu = False
+        try:
+            if torch.cuda.is_available():
+                total_mem = torch.cuda.get_device_properties(0).total_memory
+                total_gb = total_mem / (1024 ** 3)
+                offload_to_cpu = total_gb < 20.0  # T4 needs offload, A100/L4 don't
+                logger.info(
+                    "GPU detected: %.1f GB total — CPU offload %s",
+                    total_gb,
+                    "ENABLED (small VRAM)" if offload_to_cpu else "DISABLED (ample VRAM)",
+                )
+        except Exception:
+            pass
 
         kwargs: dict[str, Any] = {
             "trust_remote_code": True,
@@ -523,14 +541,14 @@ class ModelRouter:
                 bnb_4bit_compute_dtype=torch.float16,
                 bnb_4bit_use_double_quant=True,
                 bnb_4bit_quant_type="nf4",
-                llm_int8_enable_fp32_cpu_offload=True,
+                llm_int8_enable_fp32_cpu_offload=offload_to_cpu,
             )
             kwargs["device_map"] = "auto"
         elif quantization in ("8bit", "8") and device != "cpu":
             from transformers import BitsAndBytesConfig
             kwargs["quantization_config"] = BitsAndBytesConfig(
                 load_in_8bit=True,
-                llm_int8_enable_fp32_cpu_offload=True,
+                llm_int8_enable_fp32_cpu_offload=offload_to_cpu,
             )
             kwargs["device_map"] = "auto"
         else:

@@ -500,53 +500,88 @@ def run(args: argparse.Namespace) -> int:
         orchestrator = _build_real_orchestrator(args)
         runner = lambda c: _run_one_real(c, orchestrator)  # noqa: E731
 
-    # NOTE: Checkpoint/resume support is intentionally omitted.  The design
-    # relies on three properties that make checkpointing unnecessary:
-    #   (1) Each run produces a timestamped JSONL file — partial results
-    #       from interrupted runs are preserved and can be analysed as-is.
-    #   (2) Failed cases are recorded inline with an "error" key rather than
-    #       aborting the loop, so transient failures don't lose progress.
-    #   (3) The --max-cases + --stratified flags allow cheap partial re-runs
-    #       that are class-balanced, making incremental evaluation practical.
-    # If checkpoint/resume is needed for very long runs (e.g. full 642-case
-    # real-mode on slow hardware), the JSONL output can be filtered against
-    # previously completed case_ids at the start of a subsequent run.
-    records: list[dict[str, Any]] = []
+    # Incremental + resumable execution:
+    #   * Each completed case is fsync'd to the per-run JSONL immediately
+    #     so a Colab disconnect mid-run never loses progress.
+    #   * --resume PATH points at an existing JSONL; case_ids already in
+    #     that file are skipped and the loop appends new records to the
+    #     same file. Without --resume, a fresh timestamped JSONL is
+    #     created.
+    Path(args.output_dir).mkdir(parents=True, exist_ok=True)
+    mode = "mock" if args.mock else "real"
+    if args.resume:
+        jsonl_path = Path(args.resume)
+        if not jsonl_path.exists():
+            raise SystemExit(f"--resume target not found: {jsonl_path}")
+        # Re-derive base + timestamp so the metrics file lands next to it.
+        base = jsonl_path.with_suffix("")
+        ts = base.name.rsplit("_", 1)[-1]   # "dermagent_subset_real_<ts>"
+        completed_records: list[dict[str, Any]] = []
+        completed_ids: set[str] = set()
+        for line in jsonl_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            rec = json.loads(line)
+            completed_records.append(rec)
+            completed_ids.add(rec["case_id"])
+        logger.info(
+            "Resume: %d cases already done in %s; %d remaining.",
+            len(completed_ids), jsonl_path,
+            sum(1 for c in cases if c["case_id"] not in completed_ids),
+        )
+        cases_to_run = [c for c in cases if c["case_id"] not in completed_ids]
+    else:
+        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        base = Path(args.output_dir) / f"dermagent_subset_{mode}_{ts}"
+        jsonl_path = base.with_suffix(".jsonl")
+        completed_records = []
+        cases_to_run = list(cases)
+    metrics_path = base.with_suffix(".metrics.json")
+    logger.info("Output JSONL: %s  (append mode, fsync per case)", jsonl_path)
+
+    new_records: list[dict[str, Any]] = []
     t0 = time.perf_counter()
-    for i, case in enumerate(cases, start=1):
-        try:
-            records.append(runner(case))
-        except Exception as exc:
-            logger.error("Case %s failed: %s", case["case_id"], exc, exc_info=args.verbose)
-            records.append({
-                "case_id": case["case_id"],
-                "ground_truth_label": case["ground_truth_label"],
-                "predicted_label": "",
-                "error": str(exc),
-            })
-        if i % 50 == 0 or i == len(cases):
-            logger.info("  progress: %d / %d", i, len(cases))
+    with jsonl_path.open("a", encoding="utf-8") as fh:
+        for i, case in enumerate(cases_to_run, start=1):
+            try:
+                rec = runner(case)
+            except Exception as exc:
+                logger.error("Case %s failed: %s", case["case_id"], exc,
+                             exc_info=args.verbose)
+                rec = {
+                    "case_id": case["case_id"],
+                    "ground_truth_label": case["ground_truth_label"],
+                    "predicted_label": "",
+                    "error": str(exc),
+                }
+            fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+            fh.flush()
+            try:
+                os.fsync(fh.fileno())   # belt + suspenders against Colab disconnect
+            except OSError:
+                pass
+            new_records.append(rec)
+            if i % 10 == 0 or i == len(cases_to_run):
+                logger.info("  progress: %d / %d (new this run)",
+                            i, len(cases_to_run))
 
     elapsed = time.perf_counter() - t0
-    logger.info("All cases done in %.1fs (%.2f cases/s)", elapsed, len(cases) / max(elapsed, 1e-9))
-
-    # Emit outputs.
-    Path(args.output_dir).mkdir(parents=True, exist_ok=True)
-    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    mode = "mock" if args.mock else "real"
-    base = Path(args.output_dir) / f"dermagent_subset_{mode}_{ts}"
-    jsonl_path = base.with_suffix(".jsonl")
-    metrics_path = base.with_suffix(".metrics.json")
-
-    with jsonl_path.open("w", encoding="utf-8") as fh:
-        for r in records:
-            fh.write(json.dumps(r, ensure_ascii=False) + "\n")
+    records = completed_records + new_records
+    logger.info(
+        "Run done in %.1fs (%.2f new cases/s) — total in JSONL: %d",
+        elapsed,
+        len(new_records) / max(elapsed, 1e-9) if new_records else 0,
+        len(records),
+    )
 
     summary = {
         "mode": mode,
         "subset": str(args.subset),
         "timestamp_utc": ts,
-        "wall_clock_s": round(elapsed, 2),
+        "wall_clock_s_this_run": round(elapsed, 2),
+        "n_completed_before_this_run": len(completed_records),
+        "n_new_this_run": len(new_records),
         **_summarise(records),
     }
     metrics_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
@@ -589,6 +624,11 @@ def _build_argparser() -> argparse.ArgumentParser:
                         "DermAgent subset isn't pre-shuffled.")
     p.add_argument("--seed", type=int, default=42,
                    help="Stratified sampling seed for reproducibility.")
+    p.add_argument("--resume", default=None,
+                   help="Path to an existing per-run JSONL. case_ids already "
+                        "present are skipped and new records are appended to "
+                        "the same file. Use this after a Colab disconnect to "
+                        "continue from where you left off without losing work.")
     p.add_argument("-v", "--verbose", action="store_true")
     return p
 

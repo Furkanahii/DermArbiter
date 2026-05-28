@@ -16,7 +16,7 @@ import logging
 import os
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import Any
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -219,7 +219,7 @@ class ToolRegistry:
         tool_names: list[str],
         image_path: str | None = None,
         query: str = "",
-        unload_after_run: bool = True,
+        unload_after_run: Optional[bool] = None,
     ) -> list[ToolOutput]:
         """Execute multiple tools sequentially and collect outputs.
 
@@ -227,11 +227,19 @@ class ToolRegistry:
         is replaced with an error ``ToolOutput`` so the pipeline never
         crashes due to a single tool failure).
 
-        When ``unload_after_run`` is ``True`` (the default), each tool's
-        ``unload()`` method is called immediately after inference so GPU
-        VRAM is freed before loading the next heavy model.  This is
-        critical on T4 (16 GB) where loading all 9 tools concurrently
-        causes CUDA OOM.
+        ``unload_after_run`` policy:
+          * ``None`` (default): auto-decide from GPU VRAM. On a small
+            device (T4, 16 GB) the 9-tool pool doesn't fit concurrently
+            so unload between calls is mandatory. On A100/L4 (≥24 GB)
+            the pool fits comfortably and unload+reload is pure overhead
+            — measured 16 min/case on A100 80GB with unload=True vs an
+            expected ~1.5 min/case with the tools kept resident.
+          * ``True``: force unload (test/debug).
+          * ``False``: keep tools resident (only use when VRAM permits).
+
+        The ``DERMARBITER_UNLOAD_AFTER_RUN`` env var (``true``/``false``)
+        overrides the auto-detected default for explicit control from
+        orchestration code.
 
         Tool names listed in the ``DERMARBITER_DISABLE_TOOLS`` environment
         variable (comma-separated) are silently skipped.  This supports
@@ -257,6 +265,35 @@ class ToolRegistry:
                 "DERMARBITER_DISABLE_TOOLS set — skipping: %s",
                 disabled_tools,
             )
+
+        # Resolve unload_after_run policy.
+        # Priority: explicit arg → env var override → VRAM-based auto-detect.
+        if unload_after_run is None:
+            env_override = os.environ.get(
+                "DERMARBITER_UNLOAD_AFTER_RUN", ""
+            ).strip().lower()
+            if env_override in ("true", "1", "yes"):
+                unload_after_run = True
+            elif env_override in ("false", "0", "no"):
+                unload_after_run = False
+            else:
+                # Auto: small VRAM (< 20 GB) → unload; ample VRAM → keep loaded.
+                unload_after_run = True   # safe default
+                try:
+                    import torch
+                    if torch.cuda.is_available():
+                        total_gb = (
+                            torch.cuda.get_device_properties(0).total_memory
+                            / (1024 ** 3)
+                        )
+                        unload_after_run = total_gb < 20.0
+                        logger.info(
+                            "ToolRegistry.run_batch: GPU %.1f GB → "
+                            "unload_after_run=%s (auto)",
+                            total_gb, unload_after_run,
+                        )
+                except Exception:
+                    pass
 
         outputs: list[ToolOutput] = []
         for name in tool_names:

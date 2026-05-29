@@ -25,10 +25,15 @@ agents:
   generalist:
     name: Generalist
     description: Broad medical knowledge agent with multimodal visual grounding
-    model: google/medgemma-4b-it
-    backend: local_hf
-    device: cuda
-    quantization: 4bit
+    # Pivoted from local MedGemma-4B-it to Gemini for benchmark throughput.
+    # Local MedGemma on A100 was logging ~40 min/case end-to-end (slow 4-bit
+    # generation + KV-cache churn); Gemini API calls are 5-10 sec and let
+    # the 100-case benchmark finish in ~5 hours instead of ~80. The
+    # medical-FT diversity claim is recovered in the ablation matrix where
+    # the same panel is rerun with MedGemma back in place — that delta
+    # becomes the "local medical-FT contribution" row.
+    model: gemini-2.5-flash
+    backend: google_api
     temperature: 0.3
     max_tokens: 4096
     top_p: 0.9
@@ -43,10 +48,11 @@ agents:
   skeptic:
     name: Skeptic
     description: Adversarial agent that challenges diagnoses and raises counter-arguments
-    model: Qwen/Qwen3-8B
-    backend: local_hf
-    device: cuda
-    quantization: 4bit
+    # Pivoted from Qwen/Qwen3-8B (Alibaba family, diversity) to Gemini for
+    # throughput, same reasoning as Generalist above. The "two-family"
+    # diversity claim is preserved in the LOO ablation row.
+    model: gemini-2.5-flash
+    backend: google_api
     temperature: 0.5
     max_tokens: 4096
     top_p: 0.9

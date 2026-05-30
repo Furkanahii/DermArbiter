@@ -110,11 +110,18 @@ class SkepticAgent(BaseAgent):
             "- Challenge overconfident conclusions.\n"
             "- Consider alternative diagnoses that share similar features.\n"
             "- Note any anchoring bias (over-reliance on a single tool).\n\n"
+            "═══ CLASS PRIORS (HAM10000) ═══\n"
+            "  nv=67%, mel=11%, bkl=11%, bcc=5%, akiec=3%, df=1%, vasc=1%\n"
+            "Your skeptical role includes FLAGGING when the panel calls "
+            "rare classes (mel, bkl) on non-specific features. If peers "
+            "diagnose mel/bkl but base rate says nv is more likely, push "
+            "back. Default to nv when uncertain — over-calling malignancy "
+            "is a worse failure mode than under-calling.\n\n"
             f"{evidence_context}\n\n"
             "Respond with ONLY a JSON object in this exact schema:\n"
             "```json\n"
             "{\n"
-            '  "top3_differential": ["<most likely>", "<second>", "<third>"],\n'
+            '  "top3_differential": ["<HAM10000 code>", "<code>", "<code>"],\n'
             '  "confidence": 0.XX,\n'
             '  "reasoning": "<critical analysis of the evidence>",\n'
             '  "cited_cards": ["<card_id_1>", "<card_id_2>"],\n'
@@ -122,11 +129,12 @@ class SkepticAgent(BaseAgent):
             "}\n"
             "```\n\n"
             "Guidelines:\n"
-            "- Your confidence should reflect genuine uncertainty — be "
-            "conservative.\n"
+            "- Use HAM10000 7-class codes (nv/mel/bkl/bcc/akiec/df/vasc) in top3.\n"
+            "- Your confidence should reflect genuine uncertainty — be conservative.\n"
             "- Disagreement flags are REQUIRED — always find at least one "
             "concern (e.g. 'overconfidence:specialist', "
-            "'missing_evidence:dermoscopy', 'anchoring_bias:classifier').\n"
+            "'missing_evidence:dermoscopy', 'anchoring_bias:classifier', "
+            "'ignored_base_rate:nv_more_likely').\n"
             "- Cite evidence card IDs to ground your critique.\n"
             "- If all evidence aligns, note that but still flag the risk "
             "of groupthink.\n"

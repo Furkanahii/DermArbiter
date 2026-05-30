@@ -96,43 +96,32 @@ class GeneralistAgent(BaseAgent):
         evidence_context = self._build_evidence_context(evidence_cards)
         card_ids = [c.card_id for c in evidence_cards]
 
-        # MedGemma-4B (the configured Generalist backend) is a local model
-        # and ignores `response_mime_type` — Gemini's JSON-mode escape hatch
-        # doesn't apply here. We instead steer it with a tight one-shot
-        # example, explicit "no prose" delimiters, and a JSON-only stop
-        # condition the parser can latch onto.
-
         prompt = (
             "You are a primary-care physician with strong dermatological "
             "training, acting as the GENERALIST agent in a multi-expert "
             "diagnostic panel.\n\n"
-            "Review the evidence cards below and produce a diagnostic "
+            "Review the following evidence cards and produce a diagnostic "
             "opinion that balances specialist tool output with clinical "
             "prevalence and patient context.\n\n"
-            "═══ CLASS PRIORS (HAM10000) ═══\n"
-            "Apply these as Bayesian priors when evidence is non-specific:\n"
-            "  nv=67%, mel=11%, bkl=11%, bcc=5%, akiec=3%, df=1%, vasc=1%\n"
-            "Default to 'nv' when uncertain. Don't over-call mel/bkl on "
-            "ambiguous pigmented lesions.\n\n"
             f"{evidence_context}\n\n"
-            "═══ OUTPUT FORMAT ═══\n"
-            "Output ONE valid JSON object and NOTHING ELSE. No markdown, "
-            "no code fences, no explanation before or after. Begin your "
-            "response with `{` and end with `}`.\n\n"
-            "Required keys (use these EXACTLY — do not rename or omit):\n"
-            "  top3_differential : list of 3 HAM10000 codes (nv/mel/bkl/bcc/akiec/df/vasc)\n"
-            "  confidence        : float 0.0 to 1.0\n"
-            "  reasoning         : single string, no newlines inside\n"
-            "  cited_cards       : list of evidence-card IDs you reference\n"
-            "  disagreement_flags: list of strings (empty if no concerns)\n\n"
-            "═══ EXAMPLE (shape only — do NOT copy values) ═══\n"
-            '{"top3_differential": ["nv", "bkl", "mel"], '
-            '"confidence": 0.72, "reasoning": "Tool outputs EC-12ab and '
-            "EC-34cd suggest a benign pigmented lesion with regular borders; "
-            'prevalence in adults > 30 favors melanocytic nevus.", '
-            '"cited_cards": ["EC-12ab", "EC-34cd"], '
-            '"disagreement_flags": []}\n\n'
-            "═══ YOUR OUTPUT (JSON object only) ═══\n"
+            "Respond with ONLY a JSON object in this exact schema:\n"
+            "```json\n"
+            "{\n"
+            '  "top3_differential": ["<most likely>", "<second>", "<third>"],\n'
+            '  "confidence": 0.XX,\n'
+            '  "reasoning": "<clinical reasoning with prevalence considerations>",\n'
+            '  "cited_cards": ["<card_id_1>", "<card_id_2>"],\n'
+            '  "disagreement_flags": []\n'
+            "}\n"
+            "```\n\n"
+            "Guidelines:\n"
+            "- Confidence must be a float between 0.0 and 1.0.\n"
+            "- Consider disease prevalence — common things are common.\n"
+            "- Flag any fairness concerns from tool outputs (e.g. if a "
+            "classifier may underperform on certain skin types).\n"
+            "- Cite specific evidence card IDs in your reasoning.\n"
+            "- Consider systemic causes that a pure dermatologist might miss.\n"
+            "- Top3 differential should be ordered from most to least likely."
         )
 
         messages = [{"role": "user", "content": prompt}]

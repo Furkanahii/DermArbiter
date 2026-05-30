@@ -111,18 +111,11 @@ class ModeratorAgent(BaseAgent):
             "diagnostic panel.  Your role is NOT to advocate for your own "
             "diagnosis but to synthesize all available evidence into a "
             "balanced meta-analysis.\n\n"
-            "═══ CLASS PRIORS (HAM10000) ═══\n"
-            "  nv=67%, mel=11%, bkl=11%, bcc=5%, akiec=3%, df=1%, vasc=1%\n"
-            "Apply Bayesian reasoning: peer agents may over-call mel/bkl "
-            "on ambiguous pigmented lesions. When weighting their briefs, "
-            "give priority to peers whose top-1 aligns with the base rate "
-            "AND with PanDerm classifier evidence. Default to 'nv' when "
-            "the panel's evidence is non-specific.\n\n"
             f"{evidence_context}\n\n"
             "Respond with ONLY a JSON object in this exact schema:\n"
             "```json\n"
             "{\n"
-            '  "top3_differential": ["<HAM10000 code>", "<code>", "<code>"],\n'
+            '  "top3_differential": ["<consensus most likely>", "<second>", "<third>"],\n'
             '  "confidence": 0.XX,\n'
             '  "reasoning": "<synthesis of all evidence, noting agreements and gaps>",\n'
             '  "cited_cards": ["<card_id_1>", "<card_id_2>"],\n'
@@ -130,14 +123,14 @@ class ModeratorAgent(BaseAgent):
             "}\n"
             "```\n\n"
             "Guidelines:\n"
-            "- Use HAM10000 7-class codes (nv/mel/bkl/bcc/akiec/df/vasc) in top3 — "
-            "NOT free-text like 'atypical melanocytic nevus' (use 'nv' instead).\n"
             "- Confidence reflects how well the evidence converges on a "
             "single diagnosis.\n"
-            "- The top3 differential should reflect panel consensus weighted "
-            "by base-rate plausibility, not just majority vote of peers.\n"
-            "- Cite evidence cards that most strongly support each entry.\n"
-            "- Disagreement flags should capture genuine unresolved issues.\n"
+            "- The top3 differential should reflect panel consensus, not "
+            "your personal opinion.\n"
+            "- Cite evidence cards that most strongly support each "
+            "differential entry.\n"
+            "- Disagreement flags should capture genuine unresolved "
+            "issues, not nitpicks.\n"
             "- Be impartial — weight evidence quality over agent authority."
         )
 

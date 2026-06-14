@@ -130,6 +130,17 @@ class TestOntologyOutput:
         output = OntologyGraph().run(query="nonexistent_disease")
         assert "error" in output.result
 
+    def test_normalized_lookup(self):
+        # "basal cell carcinoma" has space, should map to "basal_cell_carcinoma"
+        output = OntologyGraph().run(query="basal cell carcinoma")
+        assert output.result["query_node"] == "basal_cell_carcinoma"
+        assert output.confidence == 1.0
+
+        # "compound-nevus" has hyphen, should map to "compound_nevus"
+        output_hyphen = OntologyGraph().run(query="compound-nevus")
+        assert output_hyphen.result["query_node"] == "compound_nevus"
+        assert output_hyphen.confidence == 1.0
+
     def test_total_nodes(self):
         output = OntologyGraph().run(query="melanoma")
         assert output.result["total_nodes"] > 50

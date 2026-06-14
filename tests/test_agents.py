@@ -676,6 +676,30 @@ class TestAgentCommon:
         assert isinstance(brief, AgentBrief)
         assert brief.agent_role == role
 
+    def test_generate_brief_parses_mappings(
+        self,
+        agent_pair: tuple[str, BaseAgent],
+        mock_router: MagicMock,
+        sample_evidence_cards: list[EvidenceCard],
+    ) -> None:
+        """Verify that generate_brief parses ICD-10 and SNOMED mappings from LLM response."""
+        role, agent = agent_pair
+        mapping_brief_json = json.dumps(
+            {
+                "top3_differential": ["melanoma", "bcc", "nevus"],
+                "confidence": 0.85,
+                "reasoning": f"Multi-modal evidence converges on melanoma for {role}.",
+                "cited_cards": ["EC-001", "EC-002"],
+                "disagreement_flags": [],
+                "icd10_mappings": {"melanoma": "C43.9", "bcc": "C44.9"},
+                "snomed_mappings": {"melanoma": "372132005", "bcc": "13331008"},
+            }
+        )
+        mock_router.call.return_value = mapping_brief_json
+        brief = agent.generate_brief(sample_evidence_cards)
+        assert brief.icd10_mappings == {"melanoma": "C43.9", "bcc": "C44.9"}
+        assert brief.snomed_mappings == {"melanoma": "372132005", "bcc": "13331008"}
+
     def test_generate_argument_returns_string(
         self,
         agent_pair: tuple[str, BaseAgent],

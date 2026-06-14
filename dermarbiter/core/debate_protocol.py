@@ -310,6 +310,23 @@ def synthesis(
     sorted_dx = sorted(scores.items(), key=lambda x: x[1], reverse=True)
     state.final_diagnosis = [dx for dx, _ in sorted_dx[:top_k]]
     
+    # Aggregate ICD-10 and SNOMED-CT mappings from all briefs
+    final_icd10 = {}
+    final_snomed = {}
+    for role in ["skeptic", "generalist", "specialist", "moderator"]:
+        brief = state.briefs.get(role)
+        if brief:
+            if hasattr(brief, "icd10_mappings") and brief.icd10_mappings:
+                for dx, code in brief.icd10_mappings.items():
+                    final_icd10[dx.strip().lower()] = code
+            if hasattr(brief, "snomed_mappings") and brief.snomed_mappings:
+                for dx, code in brief.snomed_mappings.items():
+                    final_snomed[dx.strip().lower()] = code
+                    
+    final_dx_set = {dx.lower() for dx in state.final_diagnosis}
+    state.final_icd10_mappings = {dx: code for dx, code in final_icd10.items() if dx in final_dx_set}
+    state.final_snomed_mappings = {dx: code for dx, code in final_snomed.items() if dx in final_dx_set}
+    
     # 2. Compute consensus score based on primary diagnoses agreement
     primaries = [
         brief.top3_differential[0].strip().lower()

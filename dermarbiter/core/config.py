@@ -231,6 +231,10 @@ class DermArbiterConfig(BaseModel):
         default="",
         description="Groq Cloud API key (can be overridden by env var).",
     )
+    openai_api_key: str = Field(
+        default="",
+        description="OpenAI API key (can be overridden by env var).",
+    )
     default_model: str = Field(
         default="gemini-2.0-flash",
         description="Fallback model when an agent config doesn't specify one.",
@@ -332,6 +336,30 @@ def load_config(config_dir: str) -> DermArbiterConfig:
                 if isinstance(content, dict):
                     _deep_merge(merged, content)
 
+    # --- Flatten debate config structure if nested ---
+    if "debate" in merged and isinstance(merged["debate"], dict):
+        debate_raw = merged["debate"]
+        flat_debate = {}
+        for k, v in debate_raw.items():
+            if k == "early_exit" and isinstance(v, dict):
+                for sub_k, sub_v in v.items():
+                    if sub_k == "confidence_threshold":
+                        flat_debate["early_exit_threshold"] = sub_v
+                    else:
+                        flat_debate[sub_k] = sub_v
+            elif k == "synthesis" and isinstance(v, dict):
+                for sub_k, sub_v in v.items():
+                    if sub_k == "top_k_diagnoses":
+                        flat_debate["top_k_diagnoses"] = sub_v
+                    else:
+                        flat_debate[sub_k] = sub_v
+            else:
+                flat_debate[k] = v
+        # Shorthand aliases for debate
+        if "token_budget_per_turn" in flat_debate:
+            flat_debate["max_tokens_per_turn"] = flat_debate.pop("token_budget_per_turn")
+        merged["debate"] = flat_debate
+
     # --- Transform agents (list or dict) → dict keyed by role ---
     if "agents" in merged and isinstance(merged["agents"], list):
         agents_dict: dict[str, Any] = {}
@@ -370,6 +398,7 @@ def load_config(config_dir: str) -> DermArbiterConfig:
     env_overrides: dict[str, tuple[str, type]] = {
         "GOOGLE_API_KEY": ("google_api_key", str),
         "GROQ_API_KEY": ("groq_api_key", str),
+        "OPENAI_API_KEY": ("openai_api_key", str),
         "DERMARBITER_LOG_LEVEL": ("log_level", str),
         "DERMARBITER_TOKEN_BUDGET": ("token_budget", int),
         "DERMARBITER_DEFAULT_MODEL": ("default_model", str),
@@ -383,5 +412,20 @@ def load_config(config_dir: str) -> DermArbiterConfig:
             except (TypeError, ValueError):
                 pass  # Ignore malformed env values; Pydantic will catch later
 
+    # Try project root or system environment standard OPENAI_API_KEY
+    if not merged.get("openai_api_key") and os.environ.get("OPENAI_API_KEY"):
+        merged["openai_api_key"] = os.environ.get("OPENAI_API_KEY")
+
     # --- Validate and return ---
-    return DermArbiterConfig(**merged)
+    cfg = DermArbiterConfig(**merged)
+
+    # Populate moderator's extra dict with debate early exit settings
+    if "moderator" in cfg.agents:
+        mod_extra = cfg.agents["moderator"].extra
+        mod_extra["min_agreement"] = cfg.debate.min_agreement
+        mod_extra["early_exit_threshold"] = cfg.debate.early_exit_threshold
+        mod_extra["confidence_floor"] = cfg.debate.confidence_floor
+        mod_extra["require_no_flags"] = cfg.debate.require_no_flags
+        mod_extra["require_unanimous"] = cfg.debate.require_unanimous
+
+    return cfg

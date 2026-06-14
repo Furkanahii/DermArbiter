@@ -451,6 +451,39 @@ class TestPhase5Integration:
         assert len(bb.clinical_report) > 0
         assert bb.case_id in bb.clinical_report
 
+    def test_synthesis_aggregates_mappings(self, agents, registry, bb):
+        """Synthesis aggregates ICD-10 and SNOMED mappings from all briefs."""
+        plan_probe(bb, agents, registry)
+        independent_read(bb, agents)
+        
+        # Manually add mappings to the briefs before synthesis
+        bb.briefs["specialist"].icd10_mappings = {"melanoma": "C43.9", "basal_cell_carcinoma": "C44.9"}
+        bb.briefs["specialist"].snomed_mappings = {"melanoma": "372132005", "basal_cell_carcinoma": "13331008"}
+        
+        bb.briefs["generalist"].icd10_mappings = {"melanoma": "C43.9", "nevus": "D22.9"}
+        bb.briefs["generalist"].snomed_mappings = {"melanoma": "372132005", "nevus": "400192004"}
+        
+        synthesis(bb, agents)
+        
+        # The final diagnoses should have mapping entries, others filtered out
+        final_dx = [dx.lower() for dx in bb.final_diagnosis]
+        
+        # Verify icd10 mappings
+        for dx, code in bb.final_icd10_mappings.items():
+            assert dx in final_dx
+            if dx == "melanoma":
+                assert code == "C43.9"
+            elif dx == "basal_cell_carcinoma":
+                assert code == "C44.9"
+                
+        # Verify snomed mappings
+        for dx, code in bb.final_snomed_mappings.items():
+            assert dx in final_dx
+            if dx == "melanoma":
+                assert code == "372132005"
+            elif dx == "basal_cell_carcinoma":
+                assert code == "13331008"
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # End-to-End Pipeline

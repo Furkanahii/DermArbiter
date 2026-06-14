@@ -193,7 +193,17 @@ Your AgentBrief must be returned as a JSON object with this exact schema:
   "cited_cards": ["EC-xxxxxxxx", "EC-yyyyyyyy"],
   "disagreement_flags": [
     "<flag_type:agent_role:detail>"
-  ]
+  ],
+  "icd10_mappings": {
+    "<diagnosis_1>": "<icd10_code>",
+    "<diagnosis_2>": "<icd10_code>",
+    "<diagnosis_3>": "<icd10_code>"
+  },
+  "snomed_mappings": {
+    "<diagnosis_1>": "<snomed_code>",
+    "<diagnosis_2>": "<snomed_code>",
+    "<diagnosis_3>": "<snomed_code>"
+  }
 }
 ```
 

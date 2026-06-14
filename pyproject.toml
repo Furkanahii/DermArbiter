@@ -60,6 +60,8 @@ python-dotenv = ">=1.0"
 bitsandbytes = ">=0.43"
 accelerate = ">=0.30"
 groq = ">=0.9"
+openai = ">=1.0"
+
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=8.0"

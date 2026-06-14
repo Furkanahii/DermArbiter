@@ -111,7 +111,9 @@ class SpecialistAgent(BaseAgent):
             '  "confidence": 0.XX,\n'
             '  "reasoning": "<detailed clinical reasoning citing card IDs>",\n'
             '  "cited_cards": ["<card_id_1>", "<card_id_2>"],\n'
-            '  "disagreement_flags": []\n'
+            '  "disagreement_flags": [],\n'
+            '  "icd10_mappings": {"<diagnosis_1>": "<icd10_code>", "<diagnosis_2>": "<icd10_code>", "<diagnosis_3>": "<icd10_code>"},\n'
+            '  "snomed_mappings": {"<diagnosis_1>": "<snomed_code>", "<diagnosis_2>": "<snomed_code>", "<diagnosis_3>": "<snomed_code>"}\n'
             "}\n"
             "```\n\n"
             "Guidelines:\n"
@@ -119,7 +121,8 @@ class SpecialistAgent(BaseAgent):
             "- Cite specific evidence card IDs (e.g. EC-xxxx) in your reasoning.\n"
             "- Use precise dermatological terminology.\n"
             "- List disagreement flags only if you see contradictory evidence.\n"
-            "- Top3 differential should be ordered from most to least likely."
+            "- Top3 differential should be ordered from most to least likely.\n"
+            "- Provide standard ICD-10 and SNOMED-CT mappings for each of the top3 differential diagnoses."
         )
 
         messages = [{"role": "user", "content": prompt}]
@@ -141,6 +144,8 @@ class SpecialistAgent(BaseAgent):
                     reasoning=parsed.get("reasoning", ""),
                     cited_cards=cited,
                     disagreement_flags=parsed.get("disagreement_flags", []),
+                    icd10_mappings=parsed.get("icd10_mappings", {}),
+                    snomed_mappings=parsed.get("snomed_mappings", {}),
                 )
 
             # JSON parsed but missing expected keys — log raw output too.

@@ -118,7 +118,9 @@ class SkepticAgent(BaseAgent):
             '  "confidence": 0.XX,\n'
             '  "reasoning": "<critical analysis of the evidence>",\n'
             '  "cited_cards": ["<card_id_1>", "<card_id_2>"],\n'
-            '  "disagreement_flags": ["<flag_1>", "<flag_2>"]\n'
+            '  "disagreement_flags": ["<flag_1>", "<flag_2>"],\n'
+            '  "icd10_mappings": {"<diagnosis_1>": "<icd10_code>", "<diagnosis_2>": "<icd10_code>", "<diagnosis_3>": "<icd10_code>"},\n'
+            '  "snomed_mappings": {"<diagnosis_1>": "<snomed_code>", "<diagnosis_2>": "<snomed_code>", "<diagnosis_3>": "<snomed_code>"}\n'
             "}\n"
             "```\n\n"
             "Guidelines:\n"
@@ -130,7 +132,8 @@ class SkepticAgent(BaseAgent):
             "- Cite evidence card IDs to ground your critique.\n"
             "- If all evidence aligns, note that but still flag the risk "
             "of groupthink.\n"
-            "- Top3 differential should be ordered from most to least likely."
+            "- Top3 differential should be ordered from most to least likely.\n"
+            "- Provide standard ICD-10 and SNOMED-CT mappings for each of the top3 differential diagnoses."
         )
 
         messages = [{"role": "user", "content": prompt}]
@@ -162,6 +165,8 @@ class SkepticAgent(BaseAgent):
                     reasoning=parsed.get("reasoning", ""),
                     cited_cards=cited,
                     disagreement_flags=flags,
+                    icd10_mappings=parsed.get("icd10_mappings", {}),
+                    snomed_mappings=parsed.get("snomed_mappings", {}),
                 )
 
             logger.warning(

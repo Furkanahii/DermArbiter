@@ -265,6 +265,95 @@ class TestCallGroq:
 
 
 # ---------------------------------------------------------------------------
+# _call_openai Tests
+# ---------------------------------------------------------------------------
+
+class TestCallOpenAI:
+    """Tests for the OpenAI API backend."""
+
+    @pytest.fixture
+    def openai_config(self) -> DermArbiterConfig:
+        """Config with an OpenAI API key."""
+        fake_openai = MagicMock()
+        sys.modules.setdefault("openai", fake_openai)
+
+        return DermArbiterConfig(
+            google_api_key="",
+            groq_api_key="",
+            openai_api_key="sk-proj-fakekey12345",
+            agents={
+                "test_agent": AgentConfig(
+                    role="test_agent",
+                    model_backend="openai_api",
+                    model_name="gpt-4o",
+                    temperature=0.3,
+                ),
+            },
+        )
+
+    def test_call_openai_creates_client_and_calls(self, openai_config):
+        """OpenAI client should be created and chat.completions.create called."""
+        mock_response = MagicMock()
+        mock_response.choices = [
+            MagicMock(message=MagicMock(content="OpenAI says hello"))
+        ]
+
+        fake_openai = MagicMock()
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = mock_response
+        fake_openai.OpenAI.return_value = mock_client
+
+        with patch.dict(sys.modules, {"openai": fake_openai}):
+            router = ModelRouter(openai_config)
+            result = router._call_openai(
+                SAMPLE_MESSAGES,
+                model="gpt-4o",
+                temperature=0.3,
+                max_tokens=4096,
+                json_mode=True,
+            )
+
+        assert result == "OpenAI says hello"
+        mock_client.chat.completions.create.assert_called_once_with(
+            model="gpt-4o",
+            messages=SAMPLE_MESSAGES,
+            temperature=0.3,
+            max_tokens=4096,
+            response_format={"type": "json_object"},
+        )
+
+    def test_call_openai_caches_client(self, openai_config):
+        """OpenAI client should be created once and reused."""
+        mock_response = MagicMock()
+        mock_response.choices = [
+            MagicMock(message=MagicMock(content="response"))
+        ]
+
+        fake_openai = MagicMock()
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = mock_response
+        fake_openai.OpenAI.return_value = mock_client
+
+        with patch.dict(sys.modules, {"openai": fake_openai}):
+            router = ModelRouter(openai_config)
+            router._call_openai(SAMPLE_MESSAGES, "gpt-4o", temperature=0.3)
+            router._call_openai(SAMPLE_MESSAGES, "gpt-4o", temperature=0.3)
+
+        # OpenAI() instantiated only once
+        assert fake_openai.OpenAI.call_count == 1
+
+    @patch("dermarbiter.core.model_router.ModelRouter._call_openai")
+    def test_dispatch_routes_to_openai(self, mock_openai, openai_config):
+        """Verify _dispatch routes OPENAI_API to _call_openai."""
+        mock_openai.return_value = "openai response"
+        router = ModelRouter(openai_config)
+
+        result = router.call("test_agent", SAMPLE_MESSAGES)
+        mock_openai.assert_called_once()
+        assert result == "openai response"
+
+
+# ---------------------------------------------------------------------------
 # Config Integration Tests
 # ---------------------------------------------------------------------------
 

@@ -169,6 +169,16 @@ When generating your brief, output ONLY a JSON object:
   "agent_evaluations": {
     "specialist": {"evidence": "SUFFICIENT", "reasoning": "VALID", "calibration": "OVERCONFIDENT", "completeness": "COMPLETE"},
     "generalist": {"evidence": "PARTIAL", "reasoning": "WEAK", "calibration": "WELL-CALIBRATED", "completeness": "MISSING: actinic_keratosis"}
+  },
+  "icd10_mappings": {
+    "<diagnosis_1>": "<icd10_code>",
+    "<diagnosis_2>": "<icd10_code>",
+    "<diagnosis_3>": "<icd10_code>"
+  },
+  "snomed_mappings": {
+    "<diagnosis_1>": "<snomed_code>",
+    "<diagnosis_2>": "<snomed_code>",
+    "<diagnosis_3>": "<snomed_code>"
   }
 }
 ```

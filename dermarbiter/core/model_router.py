@@ -34,6 +34,7 @@ class ModelBackend(str, Enum):
     GOOGLE_API = "google_api"
     LOCAL_HF = "local_hf"
     GROQ_API = "groq_api"
+    OPENAI_API = "openai_api"
 
 
 # ---------------------------------------------------------------------------
@@ -46,6 +47,9 @@ _COST_PER_1K_TOKENS: dict[str, float] = {
     "gemini-2.0-flash-lite": 0.00005,
     "gemini-2.5-pro": 0.00125,
     "gemini-2.5-flash": 0.00015,
+    # OpenAI
+    "gpt-4o": 0.00500,
+    "gpt-4o-mini": 0.00015,
     # Groq (hosted open-source)
     "llama-3.3-70b-versatile": 0.00059,
     "llama-3.1-8b-instant": 0.00005,
@@ -57,6 +61,7 @@ _COST_PER_1K_TOKENS: dict[str, float] = {
 # Fallback order when a backend is unavailable
 _FALLBACK_ORDER: list[ModelBackend] = [
     ModelBackend.GOOGLE_API,
+    ModelBackend.OPENAI_API,
     ModelBackend.GROQ_API,
     ModelBackend.LOCAL_HF,
 ]
@@ -128,6 +133,17 @@ class ModelRouter:
                 logger.info("Groq API backend available.")
             except ImportError:
                 logger.warning("groq SDK not installed. Groq backend unavailable.")
+
+        # OpenAI API
+        if self._config.openai_api_key:
+            try:
+                import openai  # noqa: F401
+                self._initialized_backends.add(ModelBackend.OPENAI_API)
+                logger.info("OpenAI API backend available.")
+            except ImportError:
+                logger.warning("openai SDK not installed. OpenAI backend unavailable.")
+        else:
+            logger.info("OPENAI_API_KEY not set — OpenAI API backend disabled.")
 
         # Local HF (always "available" as a placeholder)
         self._initialized_backends.add(ModelBackend.LOCAL_HF)
@@ -208,6 +224,8 @@ class ModelRouter:
             if be != backend:
                 if be == ModelBackend.GOOGLE_API:
                     be_model = self._config.default_model
+                elif be == ModelBackend.OPENAI_API:
+                    be_model = "gpt-4o"
                 elif be == ModelBackend.GROQ_API:
                     # Conservative Groq default; bail if no Groq pref is set.
                     be_model = getattr(self._config, "default_groq_model",
@@ -327,6 +345,8 @@ class ModelRouter:
             return self._call_local(messages, model, device, quantization)
         elif backend == ModelBackend.GROQ_API:
             return self._call_groq(messages, model, temperature, max_tokens)
+        elif backend == ModelBackend.OPENAI_API:
+            return self._call_openai(messages, model, temperature, max_tokens, json_mode=json_mode)
         else:
             raise ValueError(f"Unknown backend: {backend}")
 
@@ -818,3 +838,48 @@ class ModelRouter:
         )
 
         return response.choices[0].message.content
+
+    # ------------------------------------------------------------------
+    # OpenAI API
+    # ------------------------------------------------------------------
+
+    def _call_openai(
+        self,
+        messages: list[dict[str, str]],
+        model: str,
+        temperature: float = 0.3,
+        max_tokens: int = 4096,
+        json_mode: bool = False,
+    ) -> str:
+        """
+        Call OpenAI API using the openai SDK.
+
+        Caches the client instance to avoid repeated initialization overhead.
+        """
+        import openai
+
+        if not hasattr(self, "_openai_client"):
+            self._openai_client = openai.OpenAI(
+                api_key=self._config.openai_api_key,
+            )
+
+        kwargs: dict[str, Any] = {
+            "model": model,
+            "messages": messages,  # type: ignore[arg-type]
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+        if json_mode:
+            kwargs["response_format"] = {"type": "json_object"}
+
+        start = time.monotonic()
+        response = self._openai_client.chat.completions.create(**kwargs)
+        elapsed = time.monotonic() - start
+        logger.debug(
+            "OpenAI call (%s, T=%.2f) completed in %.2fs",
+            model,
+            temperature,
+            elapsed,
+        )
+
+        return response.choices[0].message.content or ""

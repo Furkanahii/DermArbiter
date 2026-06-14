@@ -130,6 +130,14 @@ class AgentBrief(BaseModel):
         description="Flags raised against other agents' conclusions "
                     "(e.g. 'overconfidence:specialist', 'missing_evidence:biopsy').",
     )
+    icd10_mappings: dict[str, str] = Field(
+        default_factory=dict,
+        description="Mapping from differential diagnosis name to its ICD-10 code.",
+    )
+    snomed_mappings: dict[str, str] = Field(
+        default_factory=dict,
+        description="Mapping from differential diagnosis name to its SNOMED-CT code.",
+    )
 
     @field_validator("confidence", mode="before")
     @classmethod
@@ -240,6 +248,14 @@ class BlackboardState(BaseModel):
     clinical_report: str = Field(
         default="",
         description="Final synthesized clinical report for the end user.",
+    )
+    final_icd10_mappings: dict[str, str] = Field(
+        default_factory=dict,
+        description="Consensus mapping from diagnosis to ICD-10 code.",
+    )
+    final_snomed_mappings: dict[str, str] = Field(
+        default_factory=dict,
+        description="Consensus mapping from diagnosis to SNOMED-CT code.",
     )
 
     # --- Telemetry ---

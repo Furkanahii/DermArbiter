@@ -284,6 +284,17 @@ class TestBlackboardToDict:
         assert "top3_differential" in specialist
         assert "confidence" in specialist
 
+    def test_to_dict_includes_mappings(
+        self, populated_blackboard: BlackboardState
+    ):
+        """to_dict() should include final_icd10_mappings and final_snomed_mappings."""
+        populated_blackboard.final_icd10_mappings = {"melanoma": "C43.9"}
+        populated_blackboard.final_snomed_mappings = {"melanoma": "372132005"}
+
+        d = populated_blackboard.to_dict()
+        assert d["final_icd10_mappings"] == {"melanoma": "C43.9"}
+        assert d["final_snomed_mappings"] == {"melanoma": "372132005"}
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # ToolOutput validation (from tools.base_tool)
@@ -416,6 +427,18 @@ class TestAgentBriefValidation:
             confidence=0.5,
         )
         assert brief.reasoning == ""
+
+    def test_agent_brief_with_mappings(self):
+        """AgentBrief should correctly store and validate ICD-10 and SNOMED mappings."""
+        brief = AgentBrief(
+            agent_role="specialist",
+            top3_differential=["melanoma", "bcc"],
+            confidence=0.9,
+            icd10_mappings={"melanoma": "C43.9", "bcc": "C44.9"},
+            snomed_mappings={"melanoma": "372132005", "bcc": "13331008"},
+        )
+        assert brief.icd10_mappings == {"melanoma": "C43.9", "bcc": "C44.9"}
+        assert brief.snomed_mappings == {"melanoma": "372132005", "bcc": "13331008"}
 
 
 # ═══════════════════════════════════════════════════════════════════════════

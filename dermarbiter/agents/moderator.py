@@ -119,7 +119,9 @@ class ModeratorAgent(BaseAgent):
             '  "confidence": 0.XX,\n'
             '  "reasoning": "<synthesis of all evidence, noting agreements and gaps>",\n'
             '  "cited_cards": ["<card_id_1>", "<card_id_2>"],\n'
-            '  "disagreement_flags": ["<unresolved issue 1>"]\n'
+            '  "disagreement_flags": ["<unresolved issue 1>"],\n'
+            '  "icd10_mappings": {"<diagnosis_1>": "<icd10_code>", "<diagnosis_2>": "<icd10_code>", "<diagnosis_3>": "<icd10_code>"},\n'
+            '  "snomed_mappings": {"<diagnosis_1>": "<snomed_code>", "<diagnosis_2>": "<snomed_code>", "<diagnosis_3>": "<snomed_code>"}\n'
             "}\n"
             "```\n\n"
             "Guidelines:\n"
@@ -131,7 +133,8 @@ class ModeratorAgent(BaseAgent):
             "differential entry.\n"
             "- Disagreement flags should capture genuine unresolved "
             "issues, not nitpicks.\n"
-            "- Be impartial — weight evidence quality over agent authority."
+            "- Be impartial — weight evidence quality over agent authority.\n"
+            "- Provide standard ICD-10 and SNOMED-CT mappings for each of the top3 differential diagnoses."
         )
 
         messages = [{"role": "user", "content": prompt}]
@@ -158,6 +161,8 @@ class ModeratorAgent(BaseAgent):
                     reasoning=parsed.get("reasoning", ""),
                     cited_cards=cited,
                     disagreement_flags=parsed.get("disagreement_flags", []),
+                    icd10_mappings=parsed.get("icd10_mappings", {}),
+                    snomed_mappings=parsed.get("snomed_mappings", {}),
                 )
 
             logger.warning(

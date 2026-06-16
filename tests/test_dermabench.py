@@ -104,9 +104,18 @@ class TestBuilder:
         assert gt["management"] == "monitor"
         assert gt["reference_differential"] == ["mel", "nv"]
 
-    def test_real_source_raises_until_wired(self):
+    def test_missing_raw_file_raises(self):
+        # Real loader on an empty dir → FileNotFoundError (fail loud).
+        with pytest.raises(FileNotFoundError):
+            bdb.load_source("ddi", Path("/tmp/dermabench_nowhere_xyz"))
+
+    def test_pubmed_still_stub(self):
         with pytest.raises(NotImplementedError):
-            bdb.load_source("scin", Path("/tmp/nowhere"))
+            bdb.load_source("pubmed", Path("/tmp/nowhere"))
+
+    def test_unknown_source(self):
+        with pytest.raises(SystemExit):
+            bdb.load_source("nonexistent", Path("/tmp"))
 
     def test_write_jsonl(self, tmp_path):
         cases = bdb.build_synthetic(7)
@@ -332,3 +341,92 @@ class TestStateBridge:
         assert r["n_cases"] == 1
         assert r["dimensions"]["1_visual_diagnosis"] == 1.0  # mel == mel
         assert r["dimensions"]["3_coding"] == 1.0            # both codes match
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Real-source loaders (fixture CSVs mimic each dataset's real columns)
+# ─────────────────────────────────────────────────────────────────────────────
+class TestRealLoaders:
+    def test_ddi_loader(self, tmp_path):
+        (tmp_path / "images").mkdir()
+        (tmp_path / "ddi_metadata.csv").write_text(
+            "DDI_file,skin_tone,malignant,disease\n"
+            "000001.png,12,False,melanocytic nevus\n"
+            "000002.png,56,True,melanoma\n"
+            "000003.png,34,False,seborrheic keratosis\n",
+            encoding="utf-8",
+        )
+        cases = bdb.load_ddi(tmp_path)
+        assert len(cases) == 3
+        c0, c1, c2 = cases
+        # Fitzpatrick mapping 12→II(light), 56→V(dark), 34→III
+        assert c0["fitzpatrick_type"] == "II"
+        assert c1["fitzpatrick_type"] == "V"
+        assert c2["fitzpatrick_type"] == "III"
+        # DDI malignancy flag overrides code-table guess
+        assert c1["ground_truth"]["is_malignant"] is True
+        assert c0["ground_truth"]["is_malignant"] is False
+        # auto code enrichment
+        assert c1["ground_truth"]["icd10_code"] == "C43.9"   # melanoma
+        # pending until clinician review
+        assert all(c["annotation_status"] == "pending" for c in cases)
+        assert c1["source"] == "ddi"
+
+    def test_derm1m_loader(self, tmp_path):
+        (tmp_path / "Derm1M_v2_pretrain.csv").write_text(
+            "filename,disease_label,truncated_caption,age,gender,body_location\n"
+            "IIYI/0_1.png,melanoma,Enlarging dark lesion on the back,60,male,back\n"
+            "edu/3_2.png,nevus,No age information,No age information,female,arm\n",
+            encoding="utf-8",
+        )
+        cases = bdb.load_derm1m(tmp_path)
+        assert len(cases) == 2
+        assert cases[0]["clinical_history"] == "Enlarging dark lesion on the back"
+        assert cases[0]["patient_context"]["age"] == "60"
+        # "No age information" sentinel cleaned to empty
+        assert cases[1]["clinical_history"] == ""
+        assert cases[1]["patient_context"]["age"] == ""
+        assert cases[0]["ground_truth"]["icd10_code"] == "C43.9"
+
+    def test_scin_loader(self, tmp_path):
+        (tmp_path / "images").mkdir()
+        (tmp_path / "scin_cases.csv").write_text(
+            "case_id,dermatologist_skin_condition_on_label_name,"
+            "dermatologist_fitzpatrick_skin_type_label_1,body_parts,"
+            "symptoms,age_group,sex_at_birth,image_path\n"
+            "SCIN-1,Melanoma,FST5,back,itching,50-59,male,img1.png\n"
+            "SCIN-2,Melanocytic nevus,3,arm,none,20-29,female,img2.png\n",
+            encoding="utf-8",
+        )
+        cases = bdb.load_scin(tmp_path)
+        assert len(cases) == 2
+        assert cases[0]["fitzpatrick_type"] == "V"   # FST5 → V
+        assert cases[1]["fitzpatrick_type"] == "III" # "3" → III
+        assert "back" in cases[0]["clinical_history"]
+        assert cases[0]["ground_truth"]["diagnosis_class"] == "mel"
+        assert cases[0]["patient_context"]["scin_case_id"] == "SCIN-1"
+
+    def test_loaders_emit_scoreable_schema(self, tmp_path):
+        # A DDI case should drop straight into the scorer's gold contract.
+        (tmp_path / "images").mkdir()
+        (tmp_path / "ddi_metadata.csv").write_text(
+            "DDI_file,skin_tone,malignant,disease\n"
+            "x.png,56,True,melanoma\n", encoding="utf-8",
+        )
+        gold = bdb.load_ddi(tmp_path)
+        # mark frozen + add clinician fields so the scorer can run
+        gold[0]["ground_truth"]["reference_differential"] = ["mel", "nv"]
+        pred = [{
+            "case_id": gold[0]["case_id"],
+            "predicted_label": "mel", "top3_predictions": ["mel"],
+            "consensus_score": 0.9, "predicted_icd10": "C43.9",
+            "predicted_snomed": "372244006", "reasoning": "x",
+            "cited_cards": ["EC-1"], "urgent_referral_flag": True,
+            "recommended_management": "biopsy",
+        }]
+        from dermarbiter.evaluation.dermabench import DermAbenchScorer
+        sc = DermAbenchScorer(gold, pred)
+        r = sc.score_all()
+        assert r["n_cases"] == 1
+        assert r["dimensions"]["1_visual_diagnosis"] == 1.0
+        assert r["dimensions"]["7_safety"] == 1.0   # malignant + urgent flagged

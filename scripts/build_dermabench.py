@@ -164,20 +164,236 @@ def build_synthetic(n: int, seed: int = 42) -> list[dict[str, Any]]:
     return cases
 
 
-# ── Real-source loaders (framework stubs — fill as data lands) ──────────────
-def load_source(source: str, raw_dir: Path) -> list[dict[str, Any]]:
-    """Dispatch to a real-source loader. Each must return unified-schema
-    dicts with annotation_status='pending' (clinician completes in B3).
+# ── Real-source loaders ─────────────────────────────────────────────────────
+# Each parses a staged raw dataset into the unified DermAbench schema with
+# auto ICD/SNOMED enrichment. They emit annotation_status="pending" because
+# reference_differential + history_key_features still need the clinician
+# blind-review (Phase B3) before freezing. Source-provided fields (DDI's
+# malignancy flag, Fitzpatrick) override the code-table defaults.
 
-    These intentionally raise until the corresponding raw data is staged,
-    so a half-configured run fails loudly rather than emitting empty data.
+
+def _read_csv(path: Path) -> list[dict[str, str]]:
+    import csv
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Expected source file not found: {path}. Stage the raw data "
+            f"under the --raw-dir first."
+        )
+    # utf-8-sig strips any BOM the published CSVs ship with.
+    with path.open("r", encoding="utf-8-sig", newline="") as fh:
+        return list(csv.DictReader(fh))
+
+
+def _first(row: dict[str, str], *keys: str) -> str:
+    """First non-empty value across alternate column names."""
+    for k in keys:
+        v = (row.get(k) or "").strip()
+        if v:
+            return v
+    return ""
+
+
+# DDI skin_tone groups → a representative Fitzpatrick type. DDI annotates in
+# pairs (12 = Fitz I–II, 34 = III–IV, 56 = V–VI); the dataset's primary
+# fairness axis is light (12) vs dark (56). We store the raw group in
+# patient_context and pick a representative type for the binary light/dark
+# scorer (12→II light, 34→III light-boundary, 56→V dark).
+_DDI_SKINTONE_TO_FITZ = {"12": "II", "34": "III", "56": "V"}
+
+
+def load_ddi(raw_dir: Path) -> list[dict[str, Any]]:
+    """Stanford Diverse Dermatology Images (DDI).
+
+    Expects ``raw_dir/ddi_metadata.csv`` with columns:
+        DDI_file, skin_tone (12/34/56), malignant (True/False), disease
+    and images under ``raw_dir/images/``.
+
+    DDI is the fairness anchor: it ships Fitzpatrick groups + a biopsy-
+    confirmed malignancy flag, so Dimensions 6 (fairness) and 7 (safety)
+    get real ground truth here.
+    """
+    rows = _read_csv(raw_dir / "ddi_metadata.csv")
+    images = raw_dir / "images"
+    cases: list[dict[str, Any]] = []
+    for i, row in enumerate(rows):
+        fname = _first(row, "DDI_file", "ddi_file", "filename")
+        disease = _first(row, "disease", "diagnosis", "label")
+        if not fname or not disease:
+            continue
+        skin_tone = _first(row, "skin_tone", "skin_tone_group")
+        fitz = _DDI_SKINTONE_TO_FITZ.get(skin_tone, "")
+        malignant_raw = _first(row, "malignant", "is_malignant").lower()
+        src_malignant = malignant_raw in ("true", "1", "yes")
+        cid = f"DAB-DDI-{i:04d}"
+        gt = enrich_ground_truth(disease, extra={
+            # DDI's biopsy-confirmed malignancy overrides the code-table guess.
+            "is_malignant": src_malignant,
+        })
+        cases.append({
+            "case_id": cid,
+            "source": "ddi",
+            "image_path": str(images / fname),
+            "fitzpatrick_type": fitz,
+            "clinical_history": "",   # DDI has no narrative — B3 may add context
+            "query": "What is the most likely diagnosis and recommended management?",
+            "patient_context": {"skin_tone_group": skin_tone},
+            "ground_truth": gt,
+            "annotation_status": "pending",
+            "annotator": "auto",
+        })
+    return cases
+
+
+def load_derm1m(raw_dir: Path) -> list[dict[str, Any]]:
+    """Derm1M manifest → DermAbench cases.
+
+    Reuses the manifest schema parsed by build_case_rag_index: columns
+    ``filename, disease_label, source, body_location, age, gender`` plus a
+    caption/clinical-text column used as the narrative. Expects
+    ``raw_dir/Derm1M_v2_pretrain.csv`` (or pass --raw-dir to its folder).
+
+    Derm1M is the narrative anchor: its captions give a real clinical
+    description for Dimension 2.
+    """
+    # find a manifest csv in raw_dir
+    candidates = list(raw_dir.glob("Derm1M*.csv")) or list(raw_dir.glob("*.csv"))
+    if not candidates:
+        raise FileNotFoundError(f"No Derm1M manifest CSV under {raw_dir}")
+    rows = _read_csv(candidates[0])
+    cases: list[dict[str, Any]] = []
+    for i, row in enumerate(rows):
+        fname = _first(row, "filename")
+        diagnosis = _first(row, "disease_label")
+        if not fname or not diagnosis:
+            continue
+        caption = _first(row, "truncated_caption", "caption", "text", "clinical_text")
+        # Skip Derm1M's "No <thing> information" sentinels.
+        def _clean(v: str) -> str:
+            return "" if (v.lower().startswith("no ") and "information" in v.lower()) else v
+        cid = f"DAB-D1M-{i:04d}"
+        gt = enrich_ground_truth(diagnosis)
+        cases.append({
+            "case_id": cid,
+            "source": "derm1m",
+            "image_path": str(raw_dir / fname),
+            "fitzpatrick_type": "",   # Derm1M has no Fitzpatrick labels
+            "clinical_history": _clean(caption),
+            "query": "What is the most likely diagnosis and recommended management?",
+            "patient_context": {
+                "age": _clean(_first(row, "age")),
+                "sex": _clean(_first(row, "gender", "sex")),
+                "localization": _clean(_first(row, "body_location")),
+            },
+            "ground_truth": gt,
+            "annotation_status": "pending",
+            "annotator": "auto",
+        })
+    return cases
+
+
+# SCIN dermatologist Fitzpatrick columns → representative type.
+def _scin_fitz(row: dict[str, str]) -> str:
+    val = _first(row,
+                 "dermatologist_fitzpatrick_skin_type_label_1",
+                 "fitzpatrick_skin_type", "fitzpatrick")
+    # SCIN encodes e.g. "FST3" or "3"; extract the digit → Roman.
+    digits = "".join(c for c in val if c.isdigit())
+    roman = {"1": "I", "2": "II", "3": "III", "4": "IV", "5": "V", "6": "VI"}
+    return roman.get(digits[:1], "") if digits else ""
+
+
+def load_scin(raw_dir: Path) -> list[dict[str, Any]]:
+    """Google SCIN (Skin Condition Image Network).
+
+    Expects ``raw_dir/scin_cases.csv`` (+ optional ``scin_labels.csv`` merged
+    on case_id). Pulls the dermatologist condition label, Fitzpatrick,
+    body part, symptoms, and demographics — rich metadata for the narrative
+    and fairness dimensions.
+
+    SCIN's label column is a weighted list; we take the top-weighted
+    dermatologist label as the ground-truth diagnosis. (Cases without a
+    confident dermatologist label should be filtered in B3.)
+    """
+    rows = _read_csv(raw_dir / "scin_cases.csv")
+    cases: list[dict[str, Any]] = []
+    for i, row in enumerate(rows):
+        cid_src = _first(row, "case_id", "caseId", "id") or str(i)
+        diagnosis = _first(
+            row,
+            "dermatologist_skin_condition_on_label_name",
+            "dermatologist_skin_condition_label",
+            "weighted_skin_condition_label",
+            "label",
+        )
+        # label may be a "cond:weight,cond:weight" list — take the first.
+        if "," in diagnosis or ":" in diagnosis:
+            diagnosis = diagnosis.split(",")[0].split(":")[0].strip()
+        image_rel = _first(row, "image_path", "image_id", "image_1_path")
+        if not diagnosis:
+            continue
+        body = _first(row, "body_parts", "body_part", "anatom_site")
+        symptoms = _first(row, "symptoms", "condition_symptoms")
+        history_bits = [b for b in (
+            f"affected area: {body}" if body else "",
+            f"symptoms: {symptoms}" if symptoms else "",
+        ) if b]
+        cid = f"DAB-SCIN-{i:04d}"
+        gt = enrich_ground_truth(diagnosis)
+        cases.append({
+            "case_id": cid,
+            "source": "scin",
+            "image_path": str(raw_dir / "images" / image_rel) if image_rel else "",
+            "fitzpatrick_type": _scin_fitz(row),
+            "clinical_history": "; ".join(history_bits),
+            "query": "What is the most likely diagnosis and recommended management?",
+            "patient_context": {
+                "age": _first(row, "age_group", "age"),
+                "sex": _first(row, "sex_at_birth", "sex"),
+                "localization": body,
+                "scin_case_id": cid_src,
+            },
+            "ground_truth": gt,
+            "annotation_status": "pending",
+            "annotator": "auto",
+        })
+    return cases
+
+
+def load_pubmed(raw_dir: Path) -> list[dict[str, Any]]:
+    """PubMed dermatology case reports — complex atypical narratives with
+    ICD/SNOMED-coded pathology.
+
+    Left as a documented stub: case-report formats vary too widely to
+    parse generically. The intended pipeline is (a) retrieve derm case
+    reports via the PubMed E-utilities API, (b) extract the
+    image + history + final pathology diagnosis, (c) map to codes. This
+    requires a bespoke extraction step the team will build once the other
+    three sources are validated.
     """
     raise NotImplementedError(
-        f"Real-source loader for '{source}' not yet wired. Stage the raw "
-        f"{source} files under {raw_dir} and implement the parser. "
-        f"Schema: see module docstring. Use --source synthetic to test the "
-        f"harness offline in the meantime."
+        "PubMed case-report loader is a documented stub — formats vary too "
+        "widely for a generic parser. Use ddi / derm1m / scin for v1-lite; "
+        "PubMed atypical-narrative cases are a v1-full / journal-revision "
+        f"addition. (raw_dir was {raw_dir})"
     )
+
+
+_SOURCE_LOADERS = {
+    "ddi": load_ddi,
+    "derm1m": load_derm1m,
+    "scin": load_scin,
+    "pubmed": load_pubmed,
+}
+
+
+def load_source(source: str, raw_dir: Path) -> list[dict[str, Any]]:
+    """Dispatch to a real-source loader. Each returns unified-schema dicts
+    with annotation_status='pending' (clinician completes + freezes in B3).
+    """
+    loader = _SOURCE_LOADERS.get(source)
+    if loader is None:
+        raise SystemExit(f"Unknown source: {source}")
+    return loader(raw_dir)
 
 
 # ── IO ──────────────────────────────────────────────────────────────────────

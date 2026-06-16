@@ -472,6 +472,63 @@ def download_derm7pt(target_dir: Path, **_kw) -> DownloadReport:
     return report
 
 
+def download_ddi(target_dir: Path, **_kw) -> DownloadReport:
+    """DDI (Stanford Diverse Dermatology Images) — manual access.
+
+    DDI is the fairness anchor for DermAbench (Fitzpatrick skin-tone groups
+    + biopsy-confirmed malignancy). Gated behind a Stanford AIMI
+    registration + data-use agreement; cannot be fetched automatically.
+    Stages the layout expected by ``build_dermabench.py --source ddi``.
+    """
+    report = DownloadReport(dataset="DDI", target_dir=target_dir)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    (target_dir / "images").mkdir(exist_ok=True)
+    msg = (
+        "DDI (Diverse Dermatology Images) requires manual download.\n\n"
+        "Source (Stanford AIMI — free registration + data-use agreement):\n"
+        "  https://stanfordaimi.azurewebsites.net/datasets/\n"
+        "  (search 'Diverse Dermatology Images' / DDI)\n\n"
+        "Steps:\n"
+        "  1. Register, accept the DUA, download the DDI archive.\n"
+        f"  2. Unzip so that you have:\n"
+        f"     {target_dir}/ddi_metadata.csv   (DDI_file, skin_tone,\n"
+        f"                                      malignant, disease)\n"
+        f"     {target_dir}/images/*.png\n"
+        f"  3. Build DermAbench DDI cases:\n"
+        f"     python scripts/build_dermabench.py --source ddi \\\n"
+        f"         --raw-dir {target_dir} --out data/dermabench/ddi.jsonl\n\n"
+        "skin_tone 12/34/56 → Fitzpatrick I-II / III-IV / V-VI; the\n"
+        "'malignant' flag is biopsy-confirmed ground truth for DermAbench\n"
+        "Dimensions 6 (fairness) and 7 (safety)."
+    )
+    print("\n" + msg + "\n")
+    report.add_note("Manual download required (Stanford AIMI registration + DUA).")
+    return report
+
+
+def download_scin(target_dir: Path, **_kw) -> DownloadReport:
+    """SCIN (Google Skin Condition Image Network) — public GCS bucket."""
+    report = DownloadReport(dataset="SCIN", target_dir=target_dir)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    (target_dir / "images").mkdir(exist_ok=True)
+    msg = (
+        "SCIN (Skin Condition Image Network) is on a public GCS bucket.\n\n"
+        "Source: gs://dx-scin-public-data/\n"
+        "  (https://github.com/google-research-datasets/scin)\n\n"
+        "Steps (requires gsutil — `pip install gsutil`):\n"
+        f"  1. gsutil cp gs://dx-scin-public-data/dataset/scin_cases.csv {target_dir}/\n"
+        f"     gsutil cp gs://dx-scin-public-data/dataset/scin_labels.csv {target_dir}/\n"
+        f"  2. gsutil -m cp -r gs://dx-scin-public-data/dataset/images {target_dir}/\n"
+        f"  3. python scripts/build_dermabench.py --source scin \\\n"
+        f"         --raw-dir {target_dir} --out data/dermabench/scin.jsonl\n\n"
+        "Dermatologist labels + Fitzpatrick feed narrative (Dim 2) and\n"
+        "fairness (Dim 6)."
+    )
+    print("\n" + msg + "\n")
+    report.add_note("Manual download (public GCS bucket via gsutil).")
+    return report
+
+
 def download_skincap(target_dir: Path, **_kw) -> DownloadReport:
     """SkinCap is on HuggingFace; print instructions only."""
     report = DownloadReport(dataset="SkinCap", target_dir=target_dir)
@@ -500,6 +557,8 @@ HANDLERS: dict[str, Callable[..., DownloadReport]] = {
     "skincon": download_skincon,
     "derm7pt": download_derm7pt,
     "skincap": download_skincap,
+    "ddi": download_ddi,
+    "scin": download_scin,
 }
 
 

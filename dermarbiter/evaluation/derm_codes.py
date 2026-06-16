@@ -113,6 +113,41 @@ _SYNONYM_TO_CLASS: dict[str, str] = {
 }
 
 
+# ── Extended common-condition codes (beyond the HAM10000 7 classes) ─────────
+# SCIN and real clinical practice cover everyday inflammatory / infectious
+# dermatology that the 7-class cancer-screening space doesn't. These let
+# Dimension-3 (coding) score the SCIN majority. All benign/inflammatory →
+# is_malignant=False, management="monitor" (treat + follow); the clinician
+# refines management per case in B3. Codes are ICD-10-CM + SNOMED-CT.
+_EXTENDED_CODES: dict[str, dict[str, object]] = {
+    "eczema":                       {"icd10": "L20.9", "snomed": "43116000"},
+    "atopic dermatitis":            {"icd10": "L20.9", "snomed": "24079001"},
+    "urticaria":                    {"icd10": "L50.9", "snomed": "126485001"},
+    "tinea":                        {"icd10": "B35.9", "snomed": "47382004"},
+    "folliculitis":                 {"icd10": "L73.9", "snomed": "13600006"},
+    "psoriasis":                    {"icd10": "L40.9", "snomed": "9014002"},
+    "allergic contact dermatitis":  {"icd10": "L23.9", "snomed": "238575004"},
+    "contact dermatitis":           {"icd10": "L25.9", "snomed": "40275004"},
+    "cd - contact dermatitis":      {"icd10": "L25.9", "snomed": "40275004"},
+    "impetigo":                     {"icd10": "L01.00", "snomed": "48277006"},
+    "acne":                         {"icd10": "L70.9", "snomed": "88616000"},
+    "drug rash":                    {"icd10": "L27.0", "snomed": "62014003"},
+    "herpes zoster":                {"icd10": "B02.9", "snomed": "4740000"},
+    "lichen planus":                {"icd10": "L43.9", "snomed": "4776008"},
+    "lichen planus/lichenoid eruption": {"icd10": "L43.9", "snomed": "4776008"},
+    "rosacea":                      {"icd10": "L71.9", "snomed": "398909004"},
+    "scabies":                      {"icd10": "B86",   "snomed": "128869009"},
+    "vitiligo":                     {"icd10": "L80",   "snomed": "56727007"},
+    "seborrheic dermatitis":        {"icd10": "L21.9", "snomed": "50563003"},
+}
+
+
+def _extended_lookup(raw: str) -> Optional[dict[str, object]]:
+    """Match a free-text condition against the extended (non-HAM) table."""
+    key = (raw or "").strip().lower()
+    return _EXTENDED_CODES.get(key)
+
+
 def normalize_to_class(raw: str) -> str:
     """Map a free-text or coded diagnosis to a canonical HAM10000 class.
 
@@ -131,17 +166,26 @@ def normalize_to_class(raw: str) -> str:
 
 
 def icd10_for(diagnosis: str) -> Optional[str]:
-    """Reference ICD-10 code for a diagnosis (free-text or class), or None."""
+    """Reference ICD-10 code for a diagnosis (free-text or class), or None.
+
+    Checks the HAM10000 7-class table first, then the extended common-
+    condition table (eczema, psoriasis, tinea, …)."""
     cls = normalize_to_class(diagnosis)
     rec = _CLASS_CODES.get(cls)
-    return rec["icd10"] if rec else None  # type: ignore[return-value]
+    if rec:
+        return rec["icd10"]  # type: ignore[return-value]
+    ext = _extended_lookup(diagnosis)
+    return ext["icd10"] if ext else None  # type: ignore[return-value]
 
 
 def snomed_for(diagnosis: str) -> Optional[str]:
     """Reference SNOMED-CT code for a diagnosis, or None."""
     cls = normalize_to_class(diagnosis)
     rec = _CLASS_CODES.get(cls)
-    return rec["snomed"] if rec else None  # type: ignore[return-value]
+    if rec:
+        return rec["snomed"]  # type: ignore[return-value]
+    ext = _extended_lookup(diagnosis)
+    return ext["snomed"] if ext else None  # type: ignore[return-value]
 
 
 def is_malignant(diagnosis: str) -> bool:
@@ -168,15 +212,25 @@ def reference_record(diagnosis: str) -> dict[str, object]:
     """
     cls = normalize_to_class(diagnosis)
     rec = _CLASS_CODES.get(cls)
-    if not rec:
-        return {}
-    return {
-        "diagnosis_class": cls,
-        "icd10_code": rec["icd10"],
-        "snomed_code": rec["snomed"],
-        "is_malignant": rec["is_malignant"],
-        "management": rec["management"],
-    }
+    if rec:
+        return {
+            "diagnosis_class": cls,
+            "icd10_code": rec["icd10"],
+            "snomed_code": rec["snomed"],
+            "is_malignant": rec["is_malignant"],
+            "management": rec["management"],
+        }
+    # Extended common-condition fallback (benign inflammatory/infectious).
+    ext = _extended_lookup(diagnosis)
+    if ext:
+        return {
+            "diagnosis_class": "",   # not a HAM 7-class
+            "icd10_code": ext["icd10"],
+            "snomed_code": ext["snomed"],
+            "is_malignant": False,
+            "management": "monitor",  # treat + follow; clinician refines in B3
+        }
+    return {}
 
 
 def all_classes() -> list[str]:

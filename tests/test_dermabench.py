@@ -65,6 +65,18 @@ class TestDermCodes:
         assert set(dc.all_classes()) == {
             "nv", "mel", "bkl", "bcc", "akiec", "df", "vasc"}
 
+    def test_extended_common_conditions(self):
+        # SCIN-majority everyday conditions get codes via the extended table.
+        assert dc.icd10_for("Eczema") == "L20.9"
+        assert dc.icd10_for("Psoriasis") == "L40.9"
+        assert dc.icd10_for("Tinea") == "B35.9"
+        assert dc.snomed_for("Urticaria") == "126485001"
+        rec = dc.reference_record("Eczema")
+        assert rec["icd10_code"] == "L20.9"
+        assert rec["is_malignant"] is False
+        assert rec["management"] == "monitor"
+        assert rec["diagnosis_class"] == ""   # not a HAM 7-class
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # build_dermabench
@@ -388,23 +400,43 @@ class TestRealLoaders:
         assert cases[1]["patient_context"]["age"] == ""
         assert cases[0]["ground_truth"]["icd10_code"] == "C43.9"
 
-    def test_scin_loader(self, tmp_path):
-        (tmp_path / "images").mkdir()
+    def test_scin_loader_real_schema(self, tmp_path):
+        # Real SCIN: two files joined on case_id, one-hot body/symptom cols,
+        # list/dict label strings, FSTn fitzpatrick in the labels file.
         (tmp_path / "scin_cases.csv").write_text(
+            "case_id,age_group,sex_at_birth,body_parts_arm,body_parts_leg,"
+            "condition_symptoms_itching,condition_symptoms_pain,"
+            "condition_duration,image_1_path\n"
+            "C1,50-59,MALE,YES,,YES,,ONE_WEEK,dataset/images/aaa.png\n"
+            "C2,20-29,FEMALE,,YES,,YES,ONE_MONTH,dataset/images/bbb.png\n"
+            "C3,30-39,MALE,YES,,,,,dataset/images/ccc.png\n",  # no label → skipped
+            encoding="utf-8",
+        )
+        (tmp_path / "scin_labels.csv").write_text(
             "case_id,dermatologist_skin_condition_on_label_name,"
-            "dermatologist_fitzpatrick_skin_type_label_1,body_parts,"
-            "symptoms,age_group,sex_at_birth,image_path\n"
-            "SCIN-1,Melanoma,FST5,back,itching,50-59,male,img1.png\n"
-            "SCIN-2,Melanocytic nevus,3,arm,none,20-29,female,img2.png\n",
+            "weighted_skin_condition_label,dermatologist_fitzpatrick_skin_type_label_1\n"
+            'C1,"[\'Eczema\', \'Psoriasis\']","{\'Eczema\': 0.7, \'Psoriasis\': 0.3}",FST5\n'
+            'C2,"[\'Melanoma\']","{\'Melanoma\': 0.9}",FST2\n'
+            "C3,,,FST3\n",   # no label
             encoding="utf-8",
         )
         cases = bdb.load_scin(tmp_path)
+        # C3 has no dermatologist label → skipped
         assert len(cases) == 2
-        assert cases[0]["fitzpatrick_type"] == "V"   # FST5 → V
-        assert cases[1]["fitzpatrick_type"] == "III" # "3" → III
-        assert "back" in cases[0]["clinical_history"]
-        assert cases[0]["ground_truth"]["diagnosis_class"] == "mel"
-        assert cases[0]["patient_context"]["scin_case_id"] == "SCIN-1"
+        c1, c2 = cases
+        # weighted dict → highest weight wins
+        assert c1["ground_truth"]["diagnosis_label"] == "Eczema"
+        assert c1["fitzpatrick_type"] == "V"            # FST5
+        assert c2["fitzpatrick_type"] == "II"           # FST2
+        # one-hot reconstruction into narrative
+        assert "arm" in c1["clinical_history"]
+        assert "itching" in c1["clinical_history"]
+        assert "duration: one week" in c1["clinical_history"]
+        # Eczema enriched via extended code table
+        assert c1["ground_truth"]["icd10_code"] == "L20.9"
+        # Melanoma maps to HAM class + code
+        assert c2["ground_truth"]["diagnosis_class"] == "mel"
+        assert c2["ground_truth"]["icd10_code"] == "C43.9"
 
     def test_loaders_emit_scoreable_schema(self, tmp_path):
         # A DDI case should drop straight into the scorer's gold contract.

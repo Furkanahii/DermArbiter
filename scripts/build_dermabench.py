@@ -291,71 +291,119 @@ def load_derm1m(raw_dir: Path) -> list[dict[str, Any]]:
     return cases
 
 
-# SCIN dermatologist Fitzpatrick columns → representative type.
-def _scin_fitz(row: dict[str, str]) -> str:
-    val = _first(row,
-                 "dermatologist_fitzpatrick_skin_type_label_1",
-                 "fitzpatrick_skin_type", "fitzpatrick")
-    # SCIN encodes e.g. "FST3" or "3"; extract the digit → Roman.
+_FST_TO_ROMAN = {"1": "I", "2": "II", "3": "III", "4": "IV", "5": "V", "6": "VI"}
+
+
+def _scin_fitz(label_row: dict[str, str]) -> str:
+    """SCIN dermatologist Fitzpatrick (labels file) 'FSTn' → Roman."""
+    val = _first(label_row, "dermatologist_fitzpatrick_skin_type_label_1")
     digits = "".join(c for c in val if c.isdigit())
-    roman = {"1": "I", "2": "II", "3": "III", "4": "IV", "5": "V", "6": "VI"}
-    return roman.get(digits[:1], "") if digits else ""
+    return _FST_TO_ROMAN.get(digits[:1], "") if digits else ""
+
+
+def _scin_top_diagnosis(label_row: dict[str, str]) -> str:
+    """Highest-weight dermatologist condition from a SCIN labels row.
+
+    weighted_skin_condition_label is a dict-string like
+    "{'Eczema': 0.41, 'Irritant Contact Dermatitis': 0.18}". Fall back to
+    the first element of the list-string dermatologist_skin_condition_on
+    _label_name "['Eczema', ...]" when the weighted dict is absent.
+    """
+    import ast
+    weighted = (label_row.get("weighted_skin_condition_label") or "").strip()
+    if weighted:
+        try:
+            d = ast.literal_eval(weighted)
+            if isinstance(d, dict) and d:
+                return max(d.items(), key=lambda kv: kv[1])[0].strip()
+        except (ValueError, SyntaxError):
+            pass
+    listed = (label_row.get("dermatologist_skin_condition_on_label_name") or "").strip()
+    if listed:
+        try:
+            lst = ast.literal_eval(listed)
+            if isinstance(lst, list) and lst:
+                return str(lst[0]).strip()
+        except (ValueError, SyntaxError):
+            pass
+    return ""
+
+
+def _scin_collect_onehot(row: dict[str, str], prefix: str) -> list[str]:
+    """Collect human-readable tokens from SCIN one-hot columns.
+
+    e.g. prefix='body_parts_' → ['arm', 'torso back'] for the columns
+    body_parts_arm=YES, body_parts_torso_back=YES.
+    """
+    out = []
+    for col, val in row.items():
+        if col.startswith(prefix) and (val or "").strip().upper() == "YES":
+            token = col[len(prefix):].replace("_", " ").strip()
+            if token and token != "other":
+                out.append(token)
+    return out
 
 
 def load_scin(raw_dir: Path) -> list[dict[str, Any]]:
-    """Google SCIN (Skin Condition Image Network).
+    """Google SCIN (Skin Condition Image Network) — real two-file schema.
 
-    Expects ``raw_dir/scin_cases.csv`` (+ optional ``scin_labels.csv`` merged
-    on case_id). Pulls the dermatologist condition label, Fitzpatrick,
-    body part, symptoms, and demographics — rich metadata for the narrative
-    and fairness dimensions.
+    Reads scin_cases.csv (demographics, one-hot body-parts/symptoms, image
+    paths) and scin_labels.csv (dermatologist condition label + Fitzpatrick),
+    joined on case_id. Builds a narrative from the structured fields.
 
-    SCIN's label column is a weighted list; we take the top-weighted
-    dermatologist label as the ground-truth diagnosis. (Cases without a
-    confident dermatologist label should be filtered in B3.)
+    Note: SCIN labels are broad everyday-dermatology conditions (Eczema,
+    Urticaria, Tinea, Psoriasis, …) — mostly OUTSIDE the HAM10000 7-class
+    space. derm_codes enriches the overlap; the rest get empty ICD/SNOMED
+    that the clinician completes in B3. This breadth is intentional:
+    DermAbench tests holistic clinical competence, not just cancer-screening.
+
+    Only cases with a confident dermatologist label are emitted.
     """
-    rows = _read_csv(raw_dir / "scin_cases.csv")
+    cases_rows = _read_csv(raw_dir / "scin_cases.csv")
+    label_rows = _read_csv(raw_dir / "scin_labels.csv")
+    labels_by_id = {r.get("case_id", ""): r for r in label_rows}
+
     cases: list[dict[str, Any]] = []
-    for i, row in enumerate(rows):
-        cid_src = _first(row, "case_id", "caseId", "id") or str(i)
-        diagnosis = _first(
-            row,
-            "dermatologist_skin_condition_on_label_name",
-            "dermatologist_skin_condition_label",
-            "weighted_skin_condition_label",
-            "label",
-        )
-        # label may be a "cond:weight,cond:weight" list — take the first.
-        if "," in diagnosis or ":" in diagnosis:
-            diagnosis = diagnosis.split(",")[0].split(":")[0].strip()
-        image_rel = _first(row, "image_path", "image_id", "image_1_path")
+    kept = 0
+    for row in cases_rows:
+        cid_src = (row.get("case_id") or "").strip()
+        lab = labels_by_id.get(cid_src, {})
+        diagnosis = _scin_top_diagnosis(lab)
         if not diagnosis:
-            continue
-        body = _first(row, "body_parts", "body_part", "anatom_site")
-        symptoms = _first(row, "symptoms", "condition_symptoms")
-        history_bits = [b for b in (
-            f"affected area: {body}" if body else "",
-            f"symptoms: {symptoms}" if symptoms else "",
-        ) if b]
-        cid = f"DAB-SCIN-{i:04d}"
+            continue   # no confident dermatologist label → skip (B3 policy)
+        image_rel = _first(row, "image_1_path", "image_path")
+        body = _scin_collect_onehot(row, "body_parts_")
+        symptoms = _scin_collect_onehot(row, "condition_symptoms_")
+        duration = _first(row, "condition_duration").replace("_", " ").lower()
+        history_bits = []
+        if body:
+            history_bits.append("affected area: " + ", ".join(body))
+        if symptoms:
+            history_bits.append("symptoms: " + ", ".join(symptoms))
+        if duration and duration not in ("", "unknown"):
+            history_bits.append("duration: " + duration)
+
+        cid = f"DAB-SCIN-{kept:04d}"
         gt = enrich_ground_truth(diagnosis)
         cases.append({
             "case_id": cid,
             "source": "scin",
-            "image_path": str(raw_dir / "images" / image_rel) if image_rel else "",
-            "fitzpatrick_type": _scin_fitz(row),
+            # image_1_path already begins "dataset/images/..." in SCIN.
+            "image_path": str(raw_dir / image_rel) if image_rel else "",
+            "fitzpatrick_type": _scin_fitz(lab),
             "clinical_history": "; ".join(history_bits),
             "query": "What is the most likely diagnosis and recommended management?",
             "patient_context": {
-                "age": _first(row, "age_group", "age"),
-                "sex": _first(row, "sex_at_birth", "sex"),
-                "localization": body,
+                "age": _first(row, "age_group"),
+                "sex": _first(row, "sex_at_birth"),
+                "localization": ", ".join(body),
                 "scin_case_id": cid_src,
             },
             "ground_truth": gt,
             "annotation_status": "pending",
             "annotator": "auto",
         })
+        kept += 1
     return cases
 
 

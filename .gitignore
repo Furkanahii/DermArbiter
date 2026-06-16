@@ -56,6 +56,9 @@ data/fitzpatrick17k/test.jsonl
 data/derm7pt/
 data/skincon/
 data/skincap/
+# DermAbench: staged raw source data + generated gold/prediction JSONL
+data/dermabench/raw/
+data/dermabench/*.jsonl
 data/SNU/
 
 # Experiment outputs

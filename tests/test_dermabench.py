@@ -11,8 +11,12 @@ from pathlib import Path
 
 import pytest
 
+from types import SimpleNamespace
+
 from dermarbiter.evaluation import derm_codes as dc
-from dermarbiter.evaluation.dermabench import DermAbenchScorer
+from dermarbiter.evaluation.dermabench import (
+    DermAbenchScorer, state_to_dermabench_prediction,
+)
 
 import sys
 _SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
@@ -216,6 +220,7 @@ class TestScorerEdges:
         sc = DermAbenchScorer(gold, preds)
         assert sc.grounding() == 0.0
 
+    # noqa
     def test_wrong_predictions_low_scores(self):
         gold = bdb.build_synthetic(14, seed=9)
         preds = []
@@ -238,3 +243,92 @@ class TestScorerEdges:
         assert sc.coding()["icd10"] == 0.0
         # confident+wrong → ECE high → calibration dim low
         assert sc.calibration() > 0.5
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# state_to_dermabench_prediction — BlackboardState → prediction bridge
+# ─────────────────────────────────────────────────────────────────────────────
+class TestStateBridge:
+    def _state(self, **over):
+        spec = SimpleNamespace(
+            top3_differential=["melanoma", "nevus", "seborrheic keratosis"],
+            cited_cards=["EC-a1", "EC-b2"],
+        )
+        gen = SimpleNamespace(top3_differential=["melanoma"],
+                              cited_cards=["EC-b2", "EC-c3"])
+        base = dict(
+            final_diagnosis=["melanoma", "melanocytic nevus", "seborrheic keratosis"],
+            consensus_score=0.78,
+            clinical_report="Enlarging asymmetric lesion; melanoma favored.",
+            final_icd10_mappings={"melanoma": "C43.9"},
+            final_snomed_mappings={},
+            briefs={"specialist": spec, "generalist": gen},
+        )
+        base.update(over)
+        return SimpleNamespace(**base)
+
+    def test_label_normalised(self):
+        rec = state_to_dermabench_prediction("c1", self._state())
+        assert rec["predicted_label"] == "mel"
+        assert rec["top3_predictions"] == ["mel", "nv", "bkl"]
+
+    def test_icd_from_mapping_snomed_from_fallback(self):
+        rec = state_to_dermabench_prediction("c1", self._state())
+        assert rec["predicted_icd10"] == "C43.9"        # from moderator mapping
+        assert rec["predicted_snomed"] == "372244006"   # fallback reference table
+
+    def test_cited_cards_union(self):
+        rec = state_to_dermabench_prediction("c1", self._state())
+        assert rec["cited_cards"] == ["EC-a1", "EC-b2", "EC-c3"]
+
+    def test_triage_proxy_malignant_urgent(self):
+        rec = state_to_dermabench_prediction("c1", self._state())
+        assert rec["urgent_referral_flag"] is True
+        assert rec["recommended_management"] == "biopsy"
+
+    def test_benign_not_urgent(self):
+        st = self._state(final_diagnosis=["melanocytic nevus"],
+                         final_icd10_mappings={})
+        rec = state_to_dermabench_prediction("c1", st)
+        assert rec["predicted_label"] == "nv"
+        assert rec["urgent_referral_flag"] is False
+        assert rec["recommended_management"] == "reassure"
+
+    def test_dict_state_accepted(self):
+        st = {"final_diagnosis": ["melanoma"], "consensus_score": 0.5,
+              "clinical_report": "x", "final_icd10_mappings": {},
+              "final_snomed_mappings": {}, "briefs": {}}
+        rec = state_to_dermabench_prediction("c1", st)
+        assert rec["predicted_label"] == "mel"
+        assert rec["cited_cards"] == []
+
+    def test_moderator_fallback_when_consensus_empty(self):
+        mod = SimpleNamespace(top3_differential=["basal cell carcinoma", "nv"],
+                              cited_cards=[])
+        st = self._state(final_diagnosis=[], briefs={"moderator": mod})
+        rec = state_to_dermabench_prediction("c1", st)
+        assert rec["predicted_label"] == "bcc"
+
+    def test_fitz_and_latency_optional(self):
+        rec = state_to_dermabench_prediction("c1", self._state(),
+                                             fitzpatrick_type="V", latency_s=3.14159)
+        assert rec["fitzpatrick_type"] == "V"
+        assert rec["latency_s"] == 3.142
+
+    def test_bridge_output_scoreable(self):
+        # The bridge output should be directly consumable by the scorer.
+        gold = [{
+            "case_id": "c1", "fitzpatrick_type": "IV",
+            "ground_truth": {
+                "diagnosis_label": "mel", "icd10_code": "C43.9",
+                "snomed_code": "372244006", "is_malignant": True,
+                "management": "biopsy", "reference_differential": ["mel", "nv"],
+                "history_key_features": ["enlarging", "asymmetric"],
+            },
+        }]
+        pred = [state_to_dermabench_prediction("c1", self._state())]
+        sc = DermAbenchScorer(gold, pred)
+        r = sc.score_all()
+        assert r["n_cases"] == 1
+        assert r["dimensions"]["1_visual_diagnosis"] == 1.0  # mel == mel
+        assert r["dimensions"]["3_coding"] == 1.0            # both codes match

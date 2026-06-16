@@ -50,9 +50,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
-from dermarbiter.evaluation.derm_codes import normalize_to_class
+from dermarbiter.evaluation.derm_codes import (
+    normalize_to_class, icd10_for, snomed_for, default_management, is_malignant,
+)
 
 
 # ── Fitzpatrick light/dark grouping (protocol §5.3) ─────────────────────────
@@ -68,6 +70,88 @@ def _fitz_group(fitz: str) -> Optional[str]:
     if f in _DARK:
         return "dark"
     return None
+
+
+# ── BlackboardState → DermAbench prediction bridge ──────────────────────────
+def state_to_dermabench_prediction(
+    case_id: str,
+    state: Any,
+    *,
+    fitzpatrick_type: str = "",
+    latency_s: Optional[float] = None,
+) -> dict[str, Any]:
+    """Convert a finished pipeline BlackboardState into a DermAbench
+    prediction record (the right-hand side of the scorer's join).
+
+    Accepts either a Pydantic BlackboardState or a plain dict. Pulls:
+      * predicted_label / top3_predictions ← final_diagnosis (normalised)
+      * consensus_score                    ← consensus_score
+      * predicted_icd10 / _snomed          ← final_icd10/snomed_mappings,
+        falling back to the derm_codes reference table when the moderator
+        didn't emit a mapping for the top-1 diagnosis.
+      * reasoning                          ← clinical_report
+      * cited_cards                        ← union of all agent briefs' cites
+      * urgent_referral_flag / recommended_management ← derived from the
+        predicted top-1 via standard guidelines (v1 proxy: malignant or
+        pre-malignant ⇒ biopsy ⇒ urgent). Documented as a proxy until the
+        pipeline emits an explicit Skeptic triage signal.
+
+    The DermAbench dimensions this feeds: 1 (visual), 3 (coding), 4 (ddx),
+    5 (calibration), 7 (safety), 8 (grounding). Dimension 2 (narrative)
+    reads `reasoning`; Dimension 6 (fairness) reads the gold fitzpatrick.
+    """
+    get: Callable[..., Any] = (
+        state.get if isinstance(state, dict)
+        else lambda k, d=None: getattr(state, k, d)
+    )
+
+    raw_dx = list(get("final_diagnosis", []) or [])
+    # Moderator-brief fallback when consensus list is empty.
+    if not raw_dx:
+        briefs = get("briefs", {}) or {}
+        mod = briefs.get("moderator") if isinstance(briefs, dict) else None
+        if mod is not None:
+            raw_dx = list(getattr(mod, "top3_differential", []) or [])
+
+    norm_dx = [normalize_to_class(d) for d in raw_dx if d]
+    top1_raw = raw_dx[0] if raw_dx else ""
+    top1 = norm_dx[0] if norm_dx else ""
+
+    # Codes: prefer the moderator's emitted mapping, else reference table.
+    icd_map = get("final_icd10_mappings", {}) or {}
+    snomed_map = get("final_snomed_mappings", {}) or {}
+    pred_icd = icd_map.get(top1_raw) or (icd10_for(top1) if top1 else None)
+    pred_snomed = snomed_map.get(top1_raw) or (snomed_for(top1) if top1 else None)
+
+    # Grounding: union of cited cards across all agent briefs.
+    cited: list[str] = []
+    briefs = get("briefs", {}) or {}
+    if isinstance(briefs, dict):
+        for b in briefs.values():
+            cited.extend(getattr(b, "cited_cards", []) or [])
+    cited = sorted(set(cited))
+
+    # Triage proxy (v1): malignant or biopsy-tier ⇒ urgent.
+    mgmt = default_management(top1) if top1 else None
+    urgent = bool(top1 and (is_malignant(top1) or mgmt == "biopsy"))
+
+    rec: dict[str, Any] = {
+        "case_id": case_id,
+        "predicted_label": top1,
+        "top3_predictions": norm_dx[:3],
+        "consensus_score": float(get("consensus_score", 0.0) or 0.0),
+        "predicted_icd10": pred_icd,
+        "predicted_snomed": pred_snomed,
+        "reasoning": get("clinical_report", "") or "",
+        "cited_cards": cited,
+        "urgent_referral_flag": urgent,
+        "recommended_management": mgmt,
+    }
+    if fitzpatrick_type:
+        rec["fitzpatrick_type"] = fitzpatrick_type
+    if latency_s is not None:
+        rec["latency_s"] = round(latency_s, 3)
+    return rec
 
 
 class DermAbenchScorer:

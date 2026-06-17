@@ -123,10 +123,22 @@ IMAGE: [image_path or description]
 
 ─── CONSENSUS DIAGNOSIS ───
 Primary: [Diagnosis #1] (Consensus: XX%)
+    ICD-10: [code] | SNOMED-CT: [code]
     Supporting evidence: [brief summary]
 Secondary: [Diagnosis #2] (Consensus: XX%)
+    ICD-10: [code] | SNOMED-CT: [code]
     Supporting evidence: [brief summary]
 Tertiary: [Diagnosis #3] (if applicable)
+    ICD-10: [code] | SNOMED-CT: [code]
+
+─── CLINICAL HISTORY KEY FEATURES ───
+The following clinical history features were identified as diagnostically
+relevant by the panel and incorporated into the differential reasoning:
+- [Feature 1: e.g., "asymmetric pigmentation", "rapid growth over 3 months"]
+- [Feature 2: e.g., "pruritic", "sun-exposed location"]
+- [Feature 3: e.g., "family history of melanoma", "immunosuppression"]
+(List ALL features from the patient history that influenced the diagnosis.
+These are critical for clinical narrative evaluation.)
 
 ─── PANEL SUMMARY ───
 Specialist opinion: [1-line summary with confidence]
@@ -147,6 +159,19 @@ Consensus Score: [0.0–1.0]
 1. [Most important next step]
 2. [Secondary recommendation]
 3. [Follow-up timeline]
+
+─── EVIDENCE GROUNDING ───
+[For each key claim in the diagnosis, cite the evidence card(s) that support it.
+Format: "Claim X → EC-XXXX (tool_name, confidence)". If a claim is not backed by
+any retrieved evidence card, mark it as "clinical judgement only — no RAG citation".
+This is critical for evaluating evidence-based reasoning.]
+
+─── ICD-10 / SNOMED-CT SUMMARY ───
+[Consolidate the ICD-10 and SNOMED-CT codes for the final consensus diagnoses.
+Use codes provided by the panel agents. For each diagnosis in the final ranking:
+  Diagnosis → ICD-10: <code> | SNOMED-CT: <code>
+These codes must be clinically accurate. Prefer the specialist's codes when
+agents disagree.]
 
 ─── CLINICAL CAVEATS ───
 [All applicable caveats from the list above]

@@ -437,6 +437,13 @@ class TestRealLoaders:
         # Melanoma maps to HAM class + code
         assert c2["ground_truth"]["diagnosis_class"] == "mel"
         assert c2["ground_truth"]["icd10_code"] == "C43.9"
+        # Silver differential seeded from the weighted multi-reader label,
+        # ordered by descending weight (Eczema 0.7 before Psoriasis 0.3).
+        assert c1["ground_truth"]["reference_differential"] == ["Eczema", "Psoriasis"]
+        assert c2["ground_truth"]["reference_differential"] == ["Melanoma"]
+        # Dataset-derived → silver, not pending; clinician B3 upgrades later.
+        assert all(c["annotation_status"] == "silver_scin" for c in cases)
+        assert all(c["annotator"] == "scin_dataset" for c in cases)
 
     def test_loaders_emit_scoreable_schema(self, tmp_path):
         # A DDI case should drop straight into the scorer's gold contract.

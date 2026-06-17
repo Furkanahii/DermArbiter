@@ -275,7 +275,8 @@ def main(argv: list[str] | None = None) -> int:
         ws = out.with_name(out.stem + "_worksheet.csv")
         write_worksheet(curated, ws)
         _summarise(curated)
-        print(f"  Gold (pending):  {out}  ({len(curated)} cases)")
+        statuses = sorted({c.get("annotation_status", "?") for c in curated})
+        print(f"  Gold ({'/'.join(statuses)}):  {out}  ({len(curated)} cases)")
         print(f"  Worksheet (B3):  {ws}\n")
         return 0
 

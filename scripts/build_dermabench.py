@@ -329,6 +329,36 @@ def _scin_top_diagnosis(label_row: dict[str, str]) -> str:
     return ""
 
 
+def _scin_differential(label_row: dict[str, str], top_n: int = 3) -> list[str]:
+    """Top-N dermatologist conditions by weight from a SCIN labels row.
+
+    SCIN aggregates several dermatologists' reads into a weighted dict; the
+    higher-weight entries form a real (silver) differential, not a single
+    label. Used to seed ground_truth.reference_differential so DermAbench's
+    DDx dimension is scoreable before clinician B3 review. Ordered by
+    descending weight; falls back to the list-string when no weighted dict.
+    """
+    import ast
+    weighted = (label_row.get("weighted_skin_condition_label") or "").strip()
+    if weighted:
+        try:
+            d = ast.literal_eval(weighted)
+            if isinstance(d, dict) and d:
+                ranked = sorted(d.items(), key=lambda kv: kv[1], reverse=True)
+                return [str(k).strip() for k, _ in ranked[:top_n] if str(k).strip()]
+        except (ValueError, SyntaxError):
+            pass
+    listed = (label_row.get("dermatologist_skin_condition_on_label_name") or "").strip()
+    if listed:
+        try:
+            lst = ast.literal_eval(listed)
+            if isinstance(lst, list):
+                return [str(x).strip() for x in lst[:top_n] if str(x).strip()]
+        except (ValueError, SyntaxError):
+            pass
+    return []
+
+
 def _scin_collect_onehot(row: dict[str, str], prefix: str) -> list[str]:
     """Collect human-readable tokens from SCIN one-hot columns.
 
@@ -385,6 +415,10 @@ def load_scin(raw_dir: Path) -> list[dict[str, Any]]:
 
         cid = f"DAB-SCIN-{kept:04d}"
         gt = enrich_ground_truth(diagnosis)
+        # Seed a silver differential from SCIN's weighted multi-reader label
+        # so the DDx dimension is scoreable pre-clinician. The B3 clinician
+        # later overrides reference_differential and upgrades the status.
+        gt["reference_differential"] = _scin_differential(lab)
         cases.append({
             "case_id": cid,
             "source": "scin",
@@ -400,8 +434,10 @@ def load_scin(raw_dir: Path) -> list[dict[str, Any]]:
                 "scin_case_id": cid_src,
             },
             "ground_truth": gt,
-            "annotation_status": "pending",
-            "annotator": "auto",
+            # Silver gold: dataset-derived labels, scoreable now; a clinician
+            # later blind-reviews these (B3) and upgrades them to "frozen".
+            "annotation_status": "silver_scin",
+            "annotator": "scin_dataset",
         })
         kept += 1
     return cases

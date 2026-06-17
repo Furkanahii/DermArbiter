@@ -380,8 +380,11 @@ class TestRealLoaders:
         assert c0["ground_truth"]["is_malignant"] is False
         # auto code enrichment
         assert c1["ground_truth"]["icd10_code"] == "C43.9"   # melanoma
-        # pending until clinician review
-        assert all(c["annotation_status"] == "pending" for c in cases)
+        # biopsy-confirmed → silver gold (scoreable now), not pending
+        assert all(c["annotation_status"] == "silver_ddi" for c in cases)
+        assert all(c["annotator"] == "ddi_dataset" for c in cases)
+        # pathology label seeded as single-item reference differential
+        assert c1["ground_truth"]["reference_differential"] == ["melanoma"]
         assert c1["source"] == "ddi"
 
     def test_derm1m_loader(self, tmp_path):

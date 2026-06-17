@@ -228,6 +228,9 @@ def load_ddi(raw_dir: Path) -> list[dict[str, Any]]:
         gt = enrich_ground_truth(disease, extra={
             # DDI's biopsy-confirmed malignancy overrides the code-table guess.
             "is_malignant": src_malignant,
+            # The pathology-confirmed disease label is itself the differential
+            # anchor; seed a single-item reference so the DDx dimension scores.
+            "reference_differential": [disease] if disease else [],
         })
         cases.append({
             "case_id": cid,
@@ -238,8 +241,11 @@ def load_ddi(raw_dir: Path) -> list[dict[str, Any]]:
             "query": "What is the most likely diagnosis and recommended management?",
             "patient_context": {"skin_tone_group": skin_tone},
             "ground_truth": gt,
-            "annotation_status": "pending",
-            "annotator": "auto",
+            # Silver gold: biopsy/pathology-confirmed labels — scoreable now,
+            # stronger than dermatologist-consensus silver. Clinician B3 may
+            # still add clinical_history / history_key_features later.
+            "annotation_status": "silver_ddi",
+            "annotator": "ddi_dataset",
         })
     return cases
 

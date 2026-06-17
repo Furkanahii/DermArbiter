@@ -35,9 +35,10 @@ from typing import Any, Iterable
 logger = logging.getLogger("curate_dermabench")
 
 # Clinician worksheet columns (B3). Auto-* are pre-filled; the rest are blank
-# for the dermatologist to complete.
+# for the dermatologist to complete. image_url is a clickable public link so
+# the reviewer can view each lesion without downloading the image set.
 WORKSHEET_FIELDS = [
-    "case_id", "source", "fitzpatrick_type", "image_path",
+    "case_id", "source", "fitzpatrick_type", "image_url",
     "clinical_history", "auto_diagnosis", "auto_icd10", "auto_management",
     # ── clinician fills below ──
     "ref_dx_1", "ref_dx_2", "ref_dx_3",
@@ -46,6 +47,23 @@ WORKSHEET_FIELDS = [
     "approve",          # Y | N  (N = exclude from frozen set)
     "notes",
 ]
+
+# Public HTTPS base for SCIN images (no auth) so worksheet links open in a
+# browser / Excel / Sheets directly.
+_SCIN_IMG_BASE = "https://storage.googleapis.com/dx-scin-public-data/dataset/images/"
+
+
+def _image_url(case: dict[str, Any]) -> str:
+    """Derive a clickable public image URL from a case's image_path.
+
+    SCIN paths embed 'dataset/images/<id>.png' → map to the public bucket
+    URL. Other sources fall back to the raw path (clinician resolves locally).
+    """
+    path = case.get("image_path", "") or ""
+    marker = "dataset/images/"
+    if case.get("source") == "scin" and marker in path:
+        return _SCIN_IMG_BASE + path.split(marker, 1)[1]
+    return path
 
 
 # ── IO ──────────────────────────────────────────────────────────────────────
@@ -65,14 +83,76 @@ def _write_jsonl(cases: Iterable[dict[str, Any]], path: Path) -> int:
 
 
 # ── Fairness-aware stratified curation ──────────────────────────────────────
+def _is_malignant(case: dict[str, Any]) -> bool:
+    return bool(case.get("ground_truth", {}).get("is_malignant"))
+
+
+def _ensure_min_malignant(
+    selected: list[dict[str, Any]],
+    all_cases: list[dict[str, Any]],
+    min_malignant: int,
+    rng: random.Random,
+) -> list[dict[str, Any]]:
+    """Top up the malignant count to >= min_malignant WITHOUT changing the
+    per-Fitzpatrick group sizes: swap a selected benign case for an unselected
+    malignant case in the same Fitzpatrick group (falling back to any group).
+
+    Rationale: malignant lesions are rare in real prevalence, so a purely
+    fairness-balanced sample leaves too few for a stable Dimension-7 (safety)
+    estimate. We guarantee a floor of malignant N for the metric's CI while
+    reporting true prevalence separately. Group-preserving swaps keep the
+    fairness balance intact.
+    """
+    need = min_malignant - sum(1 for c in selected if _is_malignant(c))
+    if need <= 0:
+        return selected
+
+    sel_ids = {c["case_id"] for c in selected}
+    pool = [c for c in all_cases
+            if _is_malignant(c) and c["case_id"] not in sel_ids]
+    rng.shuffle(pool)
+
+    # Selected benign cases, grouped by Fitzpatrick, available to give up.
+    benign_by_group: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for c in selected:
+        if not _is_malignant(c):
+            benign_by_group[(c.get("fitzpatrick_type") or "?")].append(c)
+    for lst in benign_by_group.values():
+        rng.shuffle(lst)
+
+    drop_ids: set[str] = set()
+    add: list[dict[str, Any]] = []
+    for cand in pool:
+        if need <= 0:
+            break
+        g = cand.get("fitzpatrick_type") or "?"
+        donor_list = benign_by_group.get(g) or next(
+            (l for l in benign_by_group.values() if l), None)
+        if not donor_list:
+            break  # no benign left to swap out
+        donor = donor_list.pop()
+        drop_ids.add(donor["case_id"])
+        add.append(cand)
+        need -= 1
+
+    kept = [c for c in selected if c["case_id"] not in drop_ids]
+    return kept + add
+
+
 def curate(
     cases: list[dict[str, Any]],
     target_n: int = 200,
     seed: int = 42,
+    min_malignant: int = 0,
 ) -> list[dict[str, Any]]:
     """Select ~target_n cases balanced across Fitzpatrick groups and diverse
     across conditions. Cases with no Fitzpatrick are pooled under '?' and
-    contribute only if quota remains."""
+    contribute only if quota remains.
+
+    If ``min_malignant`` > 0, guarantee at least that many malignant cases via
+    group-preserving benign→malignant swaps (so Dimension-7 safety has enough
+    N) without disturbing the Fitzpatrick balance.
+    """
     rng = random.Random(seed)
 
     by_fitz: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -110,7 +190,10 @@ def curate(
             leftover_capacity -= len(extra)
 
     rng.shuffle(selected)
-    return selected[:target_n]
+    selected = selected[:target_n]
+    if min_malignant > 0:
+        selected = _ensure_min_malignant(selected, cases, min_malignant, rng)
+    return selected
 
 
 def _diverse_by_condition(
@@ -153,7 +236,7 @@ def write_worksheet(cases: list[dict[str, Any]], path: Path) -> None:
                 "case_id": c["case_id"],
                 "source": c.get("source", ""),
                 "fitzpatrick_type": c.get("fitzpatrick_type", ""),
-                "image_path": c.get("image_path", ""),
+                "image_url": _image_url(c),
                 "clinical_history": c.get("clinical_history", ""),
                 "auto_diagnosis": gt.get("diagnosis_label", ""),
                 "auto_icd10": gt.get("icd10_code") or "",
@@ -212,12 +295,16 @@ def _summarise(cases: list[dict[str, Any]]) -> None:
     fitz = Counter(c.get("fitzpatrick_type", "?") or "?" for c in cases)
     dx = Counter(c["ground_truth"].get("diagnosis_label", "?") for c in cases)
     coded = sum(1 for c in cases if c["ground_truth"].get("icd10_code"))
+    malig = sum(1 for c in cases if _is_malignant(c))
+    n = max(1, len(cases))
     print("\n" + "=" * 60)
     print(f" DermAbench v1-lite curation — {len(cases)} cases")
     print("=" * 60)
     print(f"  Fitzpatrick: {dict(sorted(fitz.items()))}")
     print(f"  Distinct conditions: {len(dx)}")
-    print(f"  ICD-coded: {coded}/{len(cases)} ({100*coded//max(1,len(cases))}%)")
+    print(f"  ICD-coded: {coded}/{len(cases)} ({100*coded//n}%)")
+    print(f"  Malignant: {malig}/{len(cases)} ({100*malig//n}% — sample rate, "
+          f"NOT real prevalence; report prevalence-adjusted separately)")
     print(f"  Top conditions: {dict(dx.most_common(8))}")
     print()
 
@@ -230,6 +317,9 @@ def _build_argparser() -> argparse.ArgumentParser:
     b.add_argument("--sources", nargs="+", required=True,
                    help="One or more DermAbench source JSONL files.")
     b.add_argument("--target-n", type=int, default=200)
+    b.add_argument("--min-malignant", type=int, default=0,
+                   help="Floor on malignant cases (group-preserving swaps) so "
+                        "the safety dimension has enough N. 0 = off.")
     b.add_argument("--out", default="data/dermabench/dermabench_v1lite.jsonl")
     b.add_argument("--seed", type=int, default=42)
 
@@ -251,13 +341,15 @@ def main(argv: list[str] | None = None) -> int:
             loaded = _load_jsonl(Path(src))
             logger.info("Loaded %d cases from %s", len(loaded), src)
             cases.extend(loaded)
-        curated = curate(cases, target_n=args.target_n, seed=args.seed)
+        curated = curate(cases, target_n=args.target_n, seed=args.seed,
+                         min_malignant=args.min_malignant)
         out = Path(args.out)
         _write_jsonl(curated, out)
         ws = out.with_name(out.stem + "_worksheet.csv")
         write_worksheet(curated, ws)
         _summarise(curated)
-        print(f"  Gold (pending):  {out}  ({len(curated)} cases)")
+        statuses = sorted({c.get("annotation_status", "?") for c in curated})
+        print(f"  Gold ({'/'.join(statuses)}):  {out}  ({len(curated)} cases)")
         print(f"  Worksheet (B3):  {ws}\n")
         return 0
 

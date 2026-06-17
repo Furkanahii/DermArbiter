@@ -110,6 +110,21 @@ def _normalize_label(raw: str) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+def _gold_label(case: dict[str, Any]) -> str:
+    """The HAM-space gold label for the DermAgent metrics record.
+
+    The DermAgent subset stores it flat as ``ground_truth_label``; DermAbench
+    gold cases (SCIN/DDI) nest it under ``ground_truth`` instead. Prefer the
+    flat field, then the nested HAM class, then the free-text label. Returns
+    "" when none is present (many SCIN conditions fall outside the 7-class
+    space — harmless: the DermAgent accuracy is partial, the real evaluation
+    is DermAbenchScorer over the separate predictions file)."""
+    if case.get("ground_truth_label"):
+        return case["ground_truth_label"]
+    gt = case.get("ground_truth", {}) or {}
+    return gt.get("diagnosis_class") or gt.get("diagnosis_label", "") or ""
+
+
 def _to_metrics_record(
     case: dict[str, Any],
     final_diagnosis: list[str],
@@ -126,7 +141,7 @@ def _to_metrics_record(
     """Produce one record consumable by MetricsCalculator.from_jsonl()."""
     rec = {
         "case_id": case["case_id"],
-        "ground_truth_label": case["ground_truth_label"],
+        "ground_truth_label": _gold_label(case),
         "predicted_label": final_diagnosis[0] if final_diagnosis else "",
         "top3_predictions": final_diagnosis[:3],
         "consensus_score": consensus_score,
@@ -575,7 +590,7 @@ def run(args: argparse.Namespace) -> int:
                                  exc_info=args.verbose)
                     rec = {
                         "case_id": case["case_id"],
-                        "ground_truth_label": case["ground_truth_label"],
+                        "ground_truth_label": _gold_label(case),
                         "predicted_label": "",
                         "error": str(exc),
                     }

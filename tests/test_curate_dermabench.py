@@ -54,6 +54,38 @@ class TestCurate:
         assert len(curated) <= 120
         assert len(curated) >= 100   # should get close to target
 
+    def _with_malignancy(self, src, malignant_ids):
+        """Tag a subset of cases as malignant for quota tests."""
+        for c in src:
+            c["ground_truth"]["is_malignant"] = c["case_id"] in malignant_ids
+        return src
+
+    def test_min_malignant_floor_met(self):
+        src = _skewed_source({"I": 80, "II": 80, "III": 80, "V": 80})
+        # make 50 cases malignant, spread across groups
+        mal_ids = {c["case_id"] for c in src[::6]}
+        self._with_malignancy(src, mal_ids)
+        curated = cur.curate(src, target_n=120, seed=7, min_malignant=30)
+        n_mal = sum(1 for c in curated if cur._is_malignant(c))
+        assert n_mal >= 30
+        assert len(curated) == 120  # size preserved by swaps
+
+    def test_min_malignant_preserves_fitzpatrick_balance(self):
+        src = _skewed_source({"I": 80, "II": 80, "III": 80, "V": 80})
+        self._with_malignancy(src, {c["case_id"] for c in src[::5]})
+        base = cur.curate(src, target_n=120, seed=7)
+        topped = cur.curate(src, target_n=120, seed=7, min_malignant=30)
+        fz_base = Counter(c["fitzpatrick_type"] for c in base)
+        fz_top = Counter(c["fitzpatrick_type"] for c in topped)
+        # group sizes identical — swaps stay within-group where possible
+        assert fz_base == fz_top
+
+    def test_min_malignant_off_by_default(self):
+        src = _skewed_source({"I": 40, "V": 40})
+        self._with_malignancy(src, set())
+        curated = cur.curate(src, target_n=40, seed=1)
+        assert sum(1 for c in curated if cur._is_malignant(c)) == 0
+
     def test_condition_diversity(self):
         src = _skewed_source({"III": 200, "IV": 200})
         curated = cur.curate(src, target_n=60, seed=3)
@@ -72,6 +104,29 @@ class TestCurate:
         assert rows[0]["auto_diagnosis"] != ""
         for blank in ("ref_dx_1", "management", "is_malignant", "approve", "notes"):
             assert rows[0][blank] == ""
+
+    def test_scin_image_url_is_clickable(self):
+        case = {
+            "source": "scin",
+            "image_path": "data/dermabench/raw/scin/dataset/images/abc123.png",
+        }
+        url = cur._image_url(case)
+        assert url == ("https://storage.googleapis.com/dx-scin-public-data/"
+                       "dataset/images/abc123.png")
+        assert url.startswith("https://")
+
+    def test_non_scin_image_url_falls_back_to_path(self):
+        case = {"source": "ddi", "image_path": "data/dermabench/raw/ddi/x.png"}
+        assert cur._image_url(case) == "data/dermabench/raw/ddi/x.png"
+
+    def test_worksheet_uses_image_url_column(self, tmp_path):
+        src = _skewed_source({"III": 5})
+        curated = cur.curate(src, target_n=5, seed=2)
+        ws = tmp_path / "ws.csv"
+        cur.write_worksheet(curated, ws)
+        rows = list(csv.DictReader(ws.open(encoding="utf-8-sig")))
+        assert "image_url" in rows[0]
+        assert "image_path" not in rows[0]
 
 
 class TestApply:

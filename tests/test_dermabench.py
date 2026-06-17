@@ -380,8 +380,11 @@ class TestRealLoaders:
         assert c0["ground_truth"]["is_malignant"] is False
         # auto code enrichment
         assert c1["ground_truth"]["icd10_code"] == "C43.9"   # melanoma
-        # pending until clinician review
-        assert all(c["annotation_status"] == "pending" for c in cases)
+        # biopsy-confirmed → silver gold (scoreable now), not pending
+        assert all(c["annotation_status"] == "silver_ddi" for c in cases)
+        assert all(c["annotator"] == "ddi_dataset" for c in cases)
+        # pathology label seeded as single-item reference differential
+        assert c1["ground_truth"]["reference_differential"] == ["melanoma"]
         assert c1["source"] == "ddi"
 
     def test_derm1m_loader(self, tmp_path):
@@ -437,6 +440,13 @@ class TestRealLoaders:
         # Melanoma maps to HAM class + code
         assert c2["ground_truth"]["diagnosis_class"] == "mel"
         assert c2["ground_truth"]["icd10_code"] == "C43.9"
+        # Silver differential seeded from the weighted multi-reader label,
+        # ordered by descending weight (Eczema 0.7 before Psoriasis 0.3).
+        assert c1["ground_truth"]["reference_differential"] == ["Eczema", "Psoriasis"]
+        assert c2["ground_truth"]["reference_differential"] == ["Melanoma"]
+        # Dataset-derived → silver, not pending; clinician B3 upgrades later.
+        assert all(c["annotation_status"] == "silver_scin" for c in cases)
+        assert all(c["annotator"] == "scin_dataset" for c in cases)
 
     def test_loaders_emit_scoreable_schema(self, tmp_path):
         # A DDI case should drop straight into the scorer's gold contract.

@@ -73,6 +73,29 @@ class TestCurate:
         for blank in ("ref_dx_1", "management", "is_malignant", "approve", "notes"):
             assert rows[0][blank] == ""
 
+    def test_scin_image_url_is_clickable(self):
+        case = {
+            "source": "scin",
+            "image_path": "data/dermabench/raw/scin/dataset/images/abc123.png",
+        }
+        url = cur._image_url(case)
+        assert url == ("https://storage.googleapis.com/dx-scin-public-data/"
+                       "dataset/images/abc123.png")
+        assert url.startswith("https://")
+
+    def test_non_scin_image_url_falls_back_to_path(self):
+        case = {"source": "ddi", "image_path": "data/dermabench/raw/ddi/x.png"}
+        assert cur._image_url(case) == "data/dermabench/raw/ddi/x.png"
+
+    def test_worksheet_uses_image_url_column(self, tmp_path):
+        src = _skewed_source({"III": 5})
+        curated = cur.curate(src, target_n=5, seed=2)
+        ws = tmp_path / "ws.csv"
+        cur.write_worksheet(curated, ws)
+        rows = list(csv.DictReader(ws.open(encoding="utf-8-sig")))
+        assert "image_url" in rows[0]
+        assert "image_path" not in rows[0]
+
 
 class TestApply:
     def _curated_and_worksheet(self, tmp_path):

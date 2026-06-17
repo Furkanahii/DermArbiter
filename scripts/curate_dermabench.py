@@ -35,9 +35,10 @@ from typing import Any, Iterable
 logger = logging.getLogger("curate_dermabench")
 
 # Clinician worksheet columns (B3). Auto-* are pre-filled; the rest are blank
-# for the dermatologist to complete.
+# for the dermatologist to complete. image_url is a clickable public link so
+# the reviewer can view each lesion without downloading the image set.
 WORKSHEET_FIELDS = [
-    "case_id", "source", "fitzpatrick_type", "image_path",
+    "case_id", "source", "fitzpatrick_type", "image_url",
     "clinical_history", "auto_diagnosis", "auto_icd10", "auto_management",
     # ── clinician fills below ──
     "ref_dx_1", "ref_dx_2", "ref_dx_3",
@@ -46,6 +47,23 @@ WORKSHEET_FIELDS = [
     "approve",          # Y | N  (N = exclude from frozen set)
     "notes",
 ]
+
+# Public HTTPS base for SCIN images (no auth) so worksheet links open in a
+# browser / Excel / Sheets directly.
+_SCIN_IMG_BASE = "https://storage.googleapis.com/dx-scin-public-data/dataset/images/"
+
+
+def _image_url(case: dict[str, Any]) -> str:
+    """Derive a clickable public image URL from a case's image_path.
+
+    SCIN paths embed 'dataset/images/<id>.png' → map to the public bucket
+    URL. Other sources fall back to the raw path (clinician resolves locally).
+    """
+    path = case.get("image_path", "") or ""
+    marker = "dataset/images/"
+    if case.get("source") == "scin" and marker in path:
+        return _SCIN_IMG_BASE + path.split(marker, 1)[1]
+    return path
 
 
 # ── IO ──────────────────────────────────────────────────────────────────────
@@ -153,7 +171,7 @@ def write_worksheet(cases: list[dict[str, Any]], path: Path) -> None:
                 "case_id": c["case_id"],
                 "source": c.get("source", ""),
                 "fitzpatrick_type": c.get("fitzpatrick_type", ""),
-                "image_path": c.get("image_path", ""),
+                "image_url": _image_url(c),
                 "clinical_history": c.get("clinical_history", ""),
                 "auto_diagnosis": gt.get("diagnosis_label", ""),
                 "auto_icd10": gt.get("icd10_code") or "",

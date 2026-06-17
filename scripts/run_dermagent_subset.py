@@ -222,7 +222,7 @@ def _run_one_real(
     # Normalize labels to HAM10000 codes (agent layer emits free text).
     final_dx_norm = [_normalize_label(d) for d in final_dx if d]
 
-    return _to_metrics_record(
+    rec = _to_metrics_record(
         case=case,
         final_diagnosis=final_dx_norm,
         consensus_score=float(get("consensus_score", 0.0) or 0.0),
@@ -232,6 +232,23 @@ def _run_one_real(
         total_tokens=int(get("total_tokens", 0) or 0),
         latency_s=latency_s,
     )
+
+    # Attach a DermAbench prediction record (the right-hand side of the
+    # DermAbench scorer join). Carried under a private key so the metrics
+    # JSONL stays unchanged; the run loop strips + writes it to a separate
+    # file when --dermabench-out is set.
+    try:
+        from dermarbiter.evaluation.dermabench import state_to_dermabench_prediction
+        rec["_dermabench"] = state_to_dermabench_prediction(
+            case["case_id"], state,
+            fitzpatrick_type=case.get("fitzpatrick_type", ""),
+            latency_s=latency_s,
+        )
+    except Exception as exc:  # never let DermAbench emit break the main run
+        logger.warning("DermAbench record build failed for %s: %s",
+                       case["case_id"], exc)
+
+    return rec
 
 
 class _OrchestratorAdapter:
@@ -540,31 +557,50 @@ def run(args: argparse.Namespace) -> int:
     metrics_path = base.with_suffix(".metrics.json")
     logger.info("Output JSONL: %s  (append mode, fsync per case)", jsonl_path)
 
+    # Optional parallel DermAbench prediction stream.
+    dab_path = Path(args.dermabench_out) if getattr(args, "dermabench_out", None) else None
+    dab_fh = dab_path.open("a", encoding="utf-8") if dab_path else None
+    if dab_fh:
+        logger.info("DermAbench predictions → %s", dab_path)
+
     new_records: list[dict[str, Any]] = []
     t0 = time.perf_counter()
-    with jsonl_path.open("a", encoding="utf-8") as fh:
-        for i, case in enumerate(cases_to_run, start=1):
-            try:
-                rec = runner(case)
-            except Exception as exc:
-                logger.error("Case %s failed: %s", case["case_id"], exc,
-                             exc_info=args.verbose)
-                rec = {
-                    "case_id": case["case_id"],
-                    "ground_truth_label": case["ground_truth_label"],
-                    "predicted_label": "",
-                    "error": str(exc),
-                }
-            fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
-            fh.flush()
-            try:
-                os.fsync(fh.fileno())   # belt + suspenders against Colab disconnect
-            except OSError:
-                pass
-            new_records.append(rec)
-            if i % 10 == 0 or i == len(cases_to_run):
-                logger.info("  progress: %d / %d (new this run)",
-                            i, len(cases_to_run))
+    try:
+        with jsonl_path.open("a", encoding="utf-8") as fh:
+            for i, case in enumerate(cases_to_run, start=1):
+                try:
+                    rec = runner(case)
+                except Exception as exc:
+                    logger.error("Case %s failed: %s", case["case_id"], exc,
+                                 exc_info=args.verbose)
+                    rec = {
+                        "case_id": case["case_id"],
+                        "ground_truth_label": case["ground_truth_label"],
+                        "predicted_label": "",
+                        "error": str(exc),
+                    }
+                # Split off the DermAbench record (private key) → its own file.
+                dab_rec = rec.pop("_dermabench", None)
+                if dab_fh and dab_rec is not None:
+                    dab_fh.write(json.dumps(dab_rec, ensure_ascii=False) + "\n")
+                    dab_fh.flush()
+                    try:
+                        os.fsync(dab_fh.fileno())
+                    except OSError:
+                        pass
+                fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+                fh.flush()
+                try:
+                    os.fsync(fh.fileno())   # belt + suspenders against Colab disconnect
+                except OSError:
+                    pass
+                new_records.append(rec)
+                if i % 10 == 0 or i == len(cases_to_run):
+                    logger.info("  progress: %d / %d (new this run)",
+                                i, len(cases_to_run))
+    finally:
+        if dab_fh:
+            dab_fh.close()
 
     elapsed = time.perf_counter() - t0
     records = completed_records + new_records
@@ -629,6 +665,11 @@ def _build_argparser() -> argparse.ArgumentParser:
                         "present are skipped and new records are appended to "
                         "the same file. Use this after a Colab disconnect to "
                         "continue from where you left off without losing work.")
+    p.add_argument("--dermabench-out", default=None,
+                   help="If set, also write a parallel DermAbench prediction "
+                        "JSONL (one record per case) to this path, scoreable "
+                        "by dermarbiter.evaluation.dermabench.DermAbenchScorer "
+                        "against a frozen gold set. Real-mode only.")
     p.add_argument("-v", "--verbose", action="store_true")
     return p
 

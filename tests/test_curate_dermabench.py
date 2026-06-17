@@ -54,6 +54,38 @@ class TestCurate:
         assert len(curated) <= 120
         assert len(curated) >= 100   # should get close to target
 
+    def _with_malignancy(self, src, malignant_ids):
+        """Tag a subset of cases as malignant for quota tests."""
+        for c in src:
+            c["ground_truth"]["is_malignant"] = c["case_id"] in malignant_ids
+        return src
+
+    def test_min_malignant_floor_met(self):
+        src = _skewed_source({"I": 80, "II": 80, "III": 80, "V": 80})
+        # make 50 cases malignant, spread across groups
+        mal_ids = {c["case_id"] for c in src[::6]}
+        self._with_malignancy(src, mal_ids)
+        curated = cur.curate(src, target_n=120, seed=7, min_malignant=30)
+        n_mal = sum(1 for c in curated if cur._is_malignant(c))
+        assert n_mal >= 30
+        assert len(curated) == 120  # size preserved by swaps
+
+    def test_min_malignant_preserves_fitzpatrick_balance(self):
+        src = _skewed_source({"I": 80, "II": 80, "III": 80, "V": 80})
+        self._with_malignancy(src, {c["case_id"] for c in src[::5]})
+        base = cur.curate(src, target_n=120, seed=7)
+        topped = cur.curate(src, target_n=120, seed=7, min_malignant=30)
+        fz_base = Counter(c["fitzpatrick_type"] for c in base)
+        fz_top = Counter(c["fitzpatrick_type"] for c in topped)
+        # group sizes identical — swaps stay within-group where possible
+        assert fz_base == fz_top
+
+    def test_min_malignant_off_by_default(self):
+        src = _skewed_source({"I": 40, "V": 40})
+        self._with_malignancy(src, set())
+        curated = cur.curate(src, target_n=40, seed=1)
+        assert sum(1 for c in curated if cur._is_malignant(c)) == 0
+
     def test_condition_diversity(self):
         src = _skewed_source({"III": 200, "IV": 200})
         curated = cur.curate(src, target_n=60, seed=3)

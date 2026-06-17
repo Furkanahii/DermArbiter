@@ -225,7 +225,12 @@ class OntologyGraph(BaseTool):
         target = query.strip().lower()
 
         if target not in self._graph:
-            return {"error": f"Node '{target}' not found in ontology."}
+            # Try normalization (e.g. spaces/hyphens to underscores)
+            normalized = target.replace(" ", "_").replace("-", "_")
+            if normalized in self._graph:
+                target = normalized
+            else:
+                return {"error": f"Node '{target}' not found in ontology."}
 
         # Key diagnoses for distance computation
         key_nodes = [

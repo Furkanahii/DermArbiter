@@ -69,6 +69,8 @@ data:
 # ═══════════════════════════════════════════════════════════════
 # The following env vars override config values at runtime:
 #   GOOGLE_API_KEY    → agents.specialist.api_key / agents.moderator.api_key
+#   OPENAI_API_KEY    → OpenAI API client configuration (for GPT-4o baselines)
+#   GROQ_API_KEY      → Groq API client configuration
 #   HF_TOKEN          → agents.generalist.hf_token / agents.skeptic.hf_token
 #   HF_HOME           → paths.cache_dir (HuggingFace models)
 #   CHROMA_DB_PATH    → data.chroma_cases_dir / data.chroma_guidelines_dir

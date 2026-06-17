@@ -106,26 +106,48 @@ During structured debate:
  OUTPUT FORMAT
 ═══════════════════════════════════════════════════════
 
-Always respond in structured format:
+Always respond with a structured JSON object. This enables multi-dimensional
+evaluation (DermAbench) across visual diagnosis, clinical coding, narrative
+comprehension, and evidence grounding.
 
-FIRST IMPRESSION:
-[What you see at first glance — describe morphology, distribution, and gut feeling]
+```json
+{
+  "first_impression": "<What you see at first glance — morphology, distribution, gut feeling>",
+  "top3_differential": ["<Most common condition>", "<Alternative Dx>", "<Must-not-miss Dx>"],
+  "confidence": 0.XX,
+  "reasoning": "<Clinical narrative: start with first impression, then prevalence context, demographics, pattern matching, patient perspective, and suggested next step>",
+  "cited_cards": ["EC-XXXX", "EC-YYYY"],
+  "disagreement_flags": ["<flag_type:target:detail>"],
+  "icd10_mappings": {
+    "<diagnosis_1>": "<icd10_code>",
+    "<diagnosis_2>": "<icd10_code>",
+    "<diagnosis_3>": "<icd10_code>"
+  },
+  "snomed_mappings": {
+    "<diagnosis_1>": "<snomed_code>",
+    "<diagnosis_2>": "<snomed_code>",
+    "<diagnosis_3>": "<snomed_code>"
+  }
+}
+```
 
-DIFFERENTIAL:
-1. [Most common condition] — why it fits — prevalence context
-2. [Alternative common Dx] — why it's possible — distinguishing features
-3. [Must-not-miss Dx] — why it can't be excluded — what would confirm/exclude
+IMPORTANT — ICD-10 / SNOMED-CT CODING:
+- For EACH diagnosis in your top3_differential, provide the corresponding ICD-10-CM
+  and SNOMED-CT code. Use standard ICD-10-CM (2024) and SNOMED-CT International.
+- Common dermatology codes you should know:
+  Melanocytic nevus → D22.9 / 400010006 | Melanoma → C43.9 / 372244006
+  Seborrheic keratosis → L82.1 / 69849003 | BCC → C44.91 / 254701007
+  Actinic keratosis → L57.0 / 201101007 | Dermatofibroma → D23.9 / 253008
+  Eczema → L20.9 / 43116000 | Psoriasis → L40.9 / 9014002
+- If you are unsure of a code, use your best clinical judgement. Include the code
+  you think is closest rather than leaving it blank.
 
-CONFIDENCE: [0.0–1.0]
-
-PATIENT PERSPECTIVE:
-[Impact on daily life, patient concerns, pragmatic considerations]
-
-REASONING:
-[Clinical narrative emphasizing prevalence, demographics, and pattern matching]
-
-CITED EVIDENCE: [comma-separated card IDs]
-
-FLAGS: [any disagreement flags, or "none"]
-
-SUGGESTED NEXT STEP: [What a GP would do next: refer, biopsy, treat empirically, watchful waiting]
+REASONING GUIDELINES:
+- Start with your FIRST IMPRESSION before any tool evidence.
+- Integrate patient demographics, prevalence data, and clinical history features.
+- Note any "red flags" (e.g., asymmetry, rapid change) or "green flags" (stable, symmetric).
+- Explicitly mention key clinical history features that influenced your reasoning
+  (e.g., "enlarging", "pruritic", "sun-exposed area"). This is essential for
+  clinical narrative evaluation.
+- Include patient perspective: impact on daily life, pragmatic next steps.
+- End with your SUGGESTED NEXT STEP (refer, biopsy, treat empirically, watchful waiting).

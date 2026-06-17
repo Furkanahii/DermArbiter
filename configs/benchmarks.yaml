@@ -76,3 +76,25 @@ benchmarks:
       - demographic_parity
     fitzpatrick_types: [I, II, III, IV, V, VI]
     num_classes: 114
+
+  bcn20000:
+    name: BCN20000
+    description: Barcelona Clinic image dataset for skin lesion classification (ISIC 2019 subset)
+    data_dir: data/bcn20000/
+    split: test
+    task: classification
+    num_classes: 8
+    metrics:
+      - accuracy
+      - balanced_accuracy
+      - f1_macro
+      - auroc
+    class_names:
+      - akiec   # Actinic keratosis
+      - bcc     # Basal cell carcinoma
+      - bkl     # Benign keratosis
+      - df      # Dermatofibroma
+      - mel     # Melanoma
+      - nv      # Melanocytic nevus
+      - vasc    # Vascular lesion
+      - scc     # Squamous cell carcinoma

@@ -214,6 +214,81 @@ class DatasetLoader:
         return cases
 
     @staticmethod
+    def load_bcn20000(
+        data_dir: str | Path,
+        split: str = "test",
+        max_cases: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """Load BCN20000 (ISIC 2019 subset) dataset.
+
+        Expects:
+            data_dir/
+                images/
+                ISIC_2019_Training_Metadata.csv (or bcn20000_metadata.csv)
+                    columns: image, MEL, NV, BCC, AK, BKL, DF, VASC, SCC, UNK
+        """
+        data_dir = Path(data_dir)
+        metadata_path = None
+        for name in ("ISIC_2019_Training_Metadata.csv", "bcn20000_metadata.csv", "metadata.csv"):
+            path = data_dir / name
+            if path.exists():
+                metadata_path = path
+                break
+
+        if not metadata_path or not metadata_path.exists():
+            jsonl_path = data_dir / f"{split}.jsonl"
+            if jsonl_path.exists():
+                return DatasetLoader.load_jsonl(jsonl_path, max_cases)
+            logger.warning("BCN20000 metadata CSV not found in %s", data_dir)
+            return []
+
+        import csv
+
+        classes = {
+            "MEL": "mel",
+            "NV": "nv",
+            "BCC": "bcc",
+            "AK": "akiec",
+            "BKL": "bkl",
+            "DF": "df",
+            "VASC": "vasc",
+            "SCC": "scc",
+        }
+
+        cases: List[Dict[str, Any]] = []
+        with open(metadata_path, "r", encoding="utf-8") as fh:
+            reader = csv.DictReader(fh)
+            for row in reader:
+                image_id = row.get("image", "")
+                image_path = str(data_dir / "images" / f"{image_id}.jpg")
+
+                gt_label = "unk"
+                for col, val in row.items():
+                    if col in classes:
+                        try:
+                            if float(val) == 1.0:
+                                gt_label = classes[col]
+                                break
+                        except ValueError:
+                            pass
+
+                case = {
+                    "case_id": image_id,
+                    "image_path": image_path,
+                    "query": "What is the diagnosis for this skin lesion?",
+                    "ground_truth_label": gt_label,
+                    "patient_context": {
+                        "age": row.get("age_approx", ""),
+                        "sex": row.get("sex", ""),
+                        "localization": row.get("anatom_site_general", ""),
+                    },
+                }
+                cases.append(case)
+                if max_cases is not None and len(cases) >= max_cases:
+                    break
+        return cases
+
+    @staticmethod
     def load_generic(
         data_dir: str | Path,
         split: str = "test",
@@ -258,6 +333,7 @@ class BenchmarkRunner:
     _LOADERS = {
         "ham10000": DatasetLoader.load_ham10000,
         "fitzpatrick17k": DatasetLoader.load_fitzpatrick17k,
+        "bcn20000": DatasetLoader.load_bcn20000,
     }
 
     def __init__(

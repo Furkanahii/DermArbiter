@@ -472,6 +472,27 @@ def download_derm7pt(target_dir: Path, **_kw) -> DownloadReport:
     return report
 
 
+def download_bcn20000(target_dir: Path, **_kw) -> DownloadReport:
+    """BCN20000 is distributed via the ISIC Archive / ISIC 2019 challenge; print instructions."""
+    report = DownloadReport(dataset="BCN20000", target_dir=target_dir)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    msg = (
+        "BCN20000 (part of the ISIC 2019 Challenge dataset) requires manual download.\n\n"
+        "Source (ISIC Archive):\n"
+        "  https://challenge.isic-archive.com/landing/2019/\n\n"
+        "Steps:\n"
+        "  1. Register on the ISIC Challenge site.\n"
+        "  2. Download BCN20000 clinical images and ground truth metadata CSV.\n"
+        f"  3. Extract so that you have:\n"
+        f"     {target_dir}/ISIC_2019_Training_Metadata.csv   (image, MEL, NV, BCC, ...)\n"
+        f"     {target_dir}/images/*.jpg\n"
+        "  4. Point BCN20000 evaluation config at this directory."
+    )
+    print("\n" + msg + "\n")
+    report.add_note("Manual download required (ISIC 2019 portal).")
+    return report
+
+
 def download_ddi(target_dir: Path, **_kw) -> DownloadReport:
     """DDI (Stanford Diverse Dermatology Images) — manual access.
 
@@ -559,6 +580,7 @@ HANDLERS: dict[str, Callable[..., DownloadReport]] = {
     "skincap": download_skincap,
     "ddi": download_ddi,
     "scin": download_scin,
+    "bcn20000": download_bcn20000,
 }
 
 

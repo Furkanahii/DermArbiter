@@ -43,6 +43,7 @@ WORKSHEET_FIELDS = [
     "ref_dx_1", "ref_dx_2", "ref_dx_3",
     "management",       # biopsy | monitor | reassure
     "is_malignant",     # Y | N
+    "history_key_features", # Comma-separated key narrative phrases
     "approve",          # Y | N  (N = exclude from frozen set)
     "notes",
 ]
@@ -160,7 +161,9 @@ def write_worksheet(cases: list[dict[str, Any]], path: Path) -> None:
                 "auto_management": gt.get("management") or "",
                 # clinician-blank
                 "ref_dx_1": "", "ref_dx_2": "", "ref_dx_3": "",
-                "management": "", "is_malignant": "", "approve": "", "notes": "",
+                "management": "", "is_malignant": "",
+                "history_key_features": ", ".join(gt.get("history_key_features", [])),
+                "approve": "", "notes": "",
             })
 
 
@@ -197,6 +200,13 @@ def apply_worksheet(
             gt["is_malignant"] = True
         elif mal in ("N", "NO", "0"):
             gt["is_malignant"] = False
+        
+        # Merge clinical narrative key features
+        feats_raw = row.get("history_key_features")
+        if feats_raw is not None:
+            feats = [f.strip() for f in feats_raw.split(",") if f.strip()]
+            gt["history_key_features"] = feats
+
         case["annotation_status"] = "frozen"
         case["annotator"] = "abdurrahim"
         if (row.get("notes") or "").strip():

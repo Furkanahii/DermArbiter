@@ -77,6 +77,13 @@ _CLASS_CODES: dict[str, dict[str, object]] = {
         "is_malignant": False,
         "management": "monitor",
     },
+    "scc": {
+        "name": "squamous cell carcinoma",
+        "icd10": "C44.92",       # Squamous cell carcinoma of skin, unspecified
+        "snomed": "402815007",   # Squamous cell carcinoma of skin
+        "is_malignant": True,
+        "management": "biopsy",
+    },
 }
 
 
@@ -107,9 +114,11 @@ _SYNONYM_TO_CLASS: dict[str, str] = {
     # vasc
     "vascular_lesion": "vasc", "vascular lesion": "vasc",
     "hemangioma": "vasc", "angioma": "vasc", "pyogenic granuloma": "vasc",
+    # scc (BCN20000 8th class — distinct from akiec)
+    "squamous_cell_carcinoma": "scc", "squamous cell carcinoma": "scc",
     # already-coded passthrough
     "nv": "nv", "mel": "mel", "bkl": "bkl", "bcc": "bcc",
-    "akiec": "akiec", "df": "df", "vasc": "vasc",
+    "akiec": "akiec", "df": "df", "vasc": "vasc", "scc": "scc",
 }
 
 
@@ -235,4 +244,5 @@ def reference_record(diagnosis: str) -> dict[str, object]:
 
 def all_classes() -> list[str]:
     """The 7 canonical HAM10000 class codes."""
-    return list(_CLASS_CODES.keys())
+    return [c for c in _CLASS_CODES.keys() if c != "scc"]
+

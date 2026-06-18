@@ -163,7 +163,7 @@ def _run_one_mock(case: dict[str, Any]) -> dict[str, Any]:
     # the metrics path is wired correctly.
     pred = classes[hash(case["case_id"]) % len(classes)]
 
-    return _to_metrics_record(
+    rec = _to_metrics_record(
         case=case,
         final_diagnosis=[pred, "nv", "bkl"],
         consensus_score=0.6,
@@ -175,6 +175,28 @@ def _run_one_mock(case: dict[str, Any]) -> dict[str, Any]:
         confidence=0.6,
         per_class_probs={c: (1.0 if c == pred else 0.0) for c in classes},
     )
+
+    try:
+        from dermarbiter.evaluation.dermabench import state_to_dermabench_prediction
+        state = {
+            "final_diagnosis": [pred, "nv", "bkl"],
+            "consensus_score": 0.6,
+            "clinical_report": f"Deterministic mock report. Patient shows {pred} with enlarging and asymmetric features.",
+            "briefs": {
+                "specialist": type("MockBrief", (), {"cited_cards": ["EC-1", "EC-2"]})(),
+            }
+        }
+        rec["_dermabench"] = state_to_dermabench_prediction(
+            case["case_id"], state,
+            fitzpatrick_type=case.get("fitzpatrick_type", ""),
+            latency_s=0.001,
+        )
+    except Exception as exc:
+        logger.warning("DermAbench mock record build failed for %s: %s",
+                       case["case_id"], exc)
+
+    return rec
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────

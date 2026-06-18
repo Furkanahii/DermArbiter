@@ -72,6 +72,8 @@ class TestCurate:
         assert rows[0]["auto_diagnosis"] != ""
         for blank in ("ref_dx_1", "management", "is_malignant", "approve", "notes"):
             assert rows[0][blank] == ""
+        # history_key_features is pre-filled from original source cases if present
+        assert "history_key_features" in rows[0]
 
 
 class TestApply:
@@ -108,6 +110,7 @@ class TestApply:
         rows[0]["ref_dx_1"] = "melanoma"; rows[0]["ref_dx_2"] = "atypical nevus"
         rows[0]["management"] = "biopsy"; rows[0]["is_malignant"] = "Y"
         rows[0]["approve"] = "Y"; rows[0]["notes"] = "urgent excision"
+        rows[0]["history_key_features"] = "asymmetric, irregular border, enlarging"
         with ws.open("w", newline="", encoding="utf-8") as fh:
             w = csv.DictWriter(fh, fieldnames=rows[0].keys())
             w.writeheader(); w.writerows(rows)
@@ -119,6 +122,8 @@ class TestApply:
         assert c["ground_truth"]["management"] == "biopsy"
         assert c["ground_truth"]["is_malignant"] is True
         assert c["clinician_notes"] == "urgent excision"
+        assert c["ground_truth"]["history_key_features"] == ["asymmetric", "irregular border", "enlarging"]
+
 
     def test_frozen_set_is_scoreable(self, tmp_path):
         # A frozen curated case should drop straight into the scorer.

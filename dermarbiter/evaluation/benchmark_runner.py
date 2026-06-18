@@ -6,7 +6,9 @@ standardised dermatology benchmarks defined in ``configs/benchmarks.yaml``:
     • HAM10000   — 7-class skin lesion classification
     • Derm7pt    — 2-class dermoscopic analysis
     • SkinCon    — concept detection
+    • SkinCap    — report generation/captioning
     • Fitzpatrick17k — 114-class classification + fairness evaluation
+    • BCN20000   — 8-class skin lesion classification (ISIC 2019 subset)
 
 Each benchmark is loaded, run through the orchestrator (mock or real),
 and results are saved as JSONL for downstream metric computation via
@@ -289,6 +291,167 @@ class DatasetLoader:
         return cases
 
     @staticmethod
+    def load_derm7pt(
+        data_dir: str | Path,
+        split: str = "test",
+        max_cases: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """Load Derm7pt dataset."""
+        data_dir = Path(data_dir)
+        meta_candidates = [
+            data_dir / "release_v0" / "meta" / "meta.csv",
+            data_dir / "meta" / "meta.csv",
+            data_dir / "meta.csv",
+        ]
+        metadata_path = None
+        for cand in meta_candidates:
+            if cand.exists():
+                metadata_path = cand
+                break
+
+        if not metadata_path:
+            jsonl_path = data_dir / f"{split}.jsonl"
+            if jsonl_path.exists():
+                return DatasetLoader.load_jsonl(jsonl_path, max_cases)
+            logger.warning("Derm7pt metadata (meta.csv) not found under %s", data_dir)
+            return []
+
+        import csv
+        meta_dir = metadata_path.parent
+        split_file = meta_dir / f"{split}_indexes.csv"
+        allowed_indexes = None
+        if split_file.exists():
+            try:
+                with open(split_file, "r", encoding="utf-8") as sf:
+                    sreader = csv.DictReader(sf)
+                    allowed_indexes = {int(r["indexes"]) for r in sreader if "indexes" in r}
+            except Exception as e:
+                logger.warning("Failed to parse split indexes from %s: %s", split_file, e)
+
+        cases: List[Dict[str, Any]] = []
+        img_dir = metadata_path.parents[1] / "images"
+        if not img_dir.exists():
+            img_dir = data_dir / "images"
+
+        with open(metadata_path, "r", encoding="utf-8") as fh:
+            reader = csv.DictReader(fh)
+            for idx, row in enumerate(reader):
+                if allowed_indexes is not None and idx not in allowed_indexes:
+                    continue
+
+                case_id = row.get("case_id", row.get("case", str(idx))).strip()
+                img_rel = row.get("derm_img", row.get("clinic_img", "")).strip()
+                if not img_rel:
+                    continue
+                if img_rel.startswith("images/"):
+                    img_path = str(img_dir.parent / img_rel)
+                else:
+                    img_path = str(img_dir / img_rel)
+
+                case = {
+                    "case_id": case_id,
+                    "image_path": img_path,
+                    "query": "What is the diagnosis for this skin lesion?",
+                    "ground_truth_label": row.get("diagnosis", "").strip().lower(),
+                    "patient_context": {
+                        "sex": row.get("sex", ""),
+                        "age": row.get("age", ""),
+                        "localization": row.get("elevation", ""),
+                    },
+                }
+                cases.append(case)
+                if max_cases is not None and len(cases) >= max_cases:
+                    break
+        return cases
+
+    @staticmethod
+    def load_skincon(
+        data_dir: str | Path,
+        split: str = "test",
+        max_cases: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """Load SkinCon dataset."""
+        data_dir = Path(data_dir)
+        metadata_path = data_dir / "annotations_fitzpatrick17k.csv"
+        if not metadata_path.exists():
+            metadata_path = data_dir / "skincon.csv"
+
+        if not metadata_path.exists():
+            jsonl_path = data_dir / f"{split}.jsonl"
+            if jsonl_path.exists():
+                return DatasetLoader.load_jsonl(jsonl_path, max_cases)
+            logger.warning("SkinCon metadata not found at %s", metadata_path)
+            return []
+
+        import csv
+        cases: List[Dict[str, Any]] = []
+        with open(metadata_path, "r", encoding="utf-8") as fh:
+            reader = csv.DictReader(fh)
+            for idx, row in enumerate(reader):
+                hasher = row.get("hasher", row.get("image_id", str(idx))).strip()
+                concepts = {}
+                for k, v in row.items():
+                    if k not in ("hasher", "label", "fitzpatrick", "url", "three_partition_label", "nine_partition_label", "fitzpatrick_scale"):
+                        try:
+                            concepts[k] = float(v)
+                        except (TypeError, ValueError):
+                            concepts[k] = v
+
+                case = {
+                    "case_id": hasher,
+                    "image_path": str(data_dir / "images" / f"{hasher}.jpg"),
+                    "query": "Annotate the clinical concepts present in this skin image.",
+                    "ground_truth_label": row.get("label", "").strip().lower(),
+                    "ground_truth_concepts": concepts,
+                    "patient_context": {
+                        "fitzpatrick_type": row.get("fitzpatrick", ""),
+                    },
+                }
+                cases.append(case)
+                if max_cases is not None and len(cases) >= max_cases:
+                    break
+        return cases
+
+    @staticmethod
+    def load_skincap(
+        data_dir: str | Path,
+        split: str = "test",
+        max_cases: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """Load SkinCap captioning dataset."""
+        data_dir = Path(data_dir)
+        metadata_path = data_dir / "skincap.csv"
+        if not metadata_path.exists():
+            metadata_path = data_dir / "metadata.csv"
+
+        if not metadata_path.exists():
+            jsonl_path = data_dir / f"{split}.jsonl"
+            if jsonl_path.exists():
+                return DatasetLoader.load_jsonl(jsonl_path, max_cases)
+            logger.warning("SkinCap metadata not found at %s", metadata_path)
+            return []
+
+        import csv
+        cases: List[Dict[str, Any]] = []
+        with open(metadata_path, "r", encoding="utf-8") as fh:
+            reader = csv.DictReader(fh)
+            for idx, row in enumerate(reader):
+                image_id = row.get("image_id", row.get("hasher", str(idx))).strip()
+                caption = row.get("caption", row.get("report", "")).strip()
+
+                case = {
+                    "case_id": image_id,
+                    "image_path": str(data_dir / "images" / f"{image_id}.jpg"),
+                    "query": "Describe the clinical appearance and features of this skin lesion.",
+                    "ground_truth_label": caption,
+                    "patient_context": {},
+                }
+                cases.append(case)
+                if max_cases is not None and len(cases) >= max_cases:
+                    break
+        return cases
+
+    @staticmethod
     def load_generic(
         data_dir: str | Path,
         split: str = "test",
@@ -334,7 +497,11 @@ class BenchmarkRunner:
         "ham10000": DatasetLoader.load_ham10000,
         "fitzpatrick17k": DatasetLoader.load_fitzpatrick17k,
         "bcn20000": DatasetLoader.load_bcn20000,
+        "derm7pt": DatasetLoader.load_derm7pt,
+        "skincon": DatasetLoader.load_skincon,
+        "skincap": DatasetLoader.load_skincap,
     }
+
 
     def __init__(
         self,

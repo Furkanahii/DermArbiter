@@ -74,6 +74,7 @@ data:
 #   HF_TOKEN          → agents.generalist.hf_token / agents.skeptic.hf_token
 #   HF_HOME           → paths.cache_dir (HuggingFace models)
 #   CHROMA_DB_PATH    → data.chroma_cases_dir / data.chroma_guidelines_dir
-#   LOG_LEVEL         → general.log_level
-#   SEED              → general.seed
+#   DERMARBITER_LOG_LEVEL     → general.log_level
+#   DERMARBITER_TOKEN_BUDGET  → debate.global_token_budget
+#   DERMARBITER_DEFAULT_MODEL → default fallback model in model router
 

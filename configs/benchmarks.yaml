@@ -36,6 +36,9 @@ benchmarks:
       - f1_macro
       - auroc
     num_classes: 2
+    class_names:
+      - benign
+      - malignant
 
   skincon:
     name: SkinCon
@@ -48,6 +51,7 @@ benchmarks:
       - f1_macro
       - precision
       - recall
+    num_classes: 50
 
   skincap:
     name: SkinCap

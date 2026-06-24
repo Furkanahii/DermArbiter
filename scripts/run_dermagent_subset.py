@@ -519,11 +519,21 @@ def run(args: argparse.Namespace) -> int:
         stratified=getattr(args, "stratified", False),
         seed=getattr(args, "seed", 42),
     )
+    # Apply query mode overrides
+    if getattr(args, "query_mode", "clinical") == "non_clinical":
+        logger.info("Running in NON-CLINICAL query mode: clinical queries overridden with info-lookup prompts.")
+        for case in cases:
+            disease_name = case.get("ground_truth_label", "this condition")
+            case["query"] = (
+                f"Provide the exact ICD-10-CM code and SNOMED-CT code for {disease_name}, "
+                f"and state its default clinical management tier."
+            )
     logger.info(
         "Loaded %d cases from %s%s",
         len(cases), args.subset,
         " (stratified)" if getattr(args, "stratified", False) else "",
     )
+
 
     # Show per-class distribution of the actual loaded sample so it's
     # obvious whether the mini-benchmark hit every class.
@@ -692,8 +702,11 @@ def _build_argparser() -> argparse.ArgumentParser:
                         "JSONL (one record per case) to this path, scoreable "
                         "by dermarbiter.evaluation.dermabench.DermAbenchScorer "
                         "against a frozen gold set. Real-mode only.")
+    p.add_argument("--query-mode", choices=["clinical", "non_clinical"], default="clinical",
+                   help="Evaluate on patient-specific clinical queries or factual non-clinical queries.")
     p.add_argument("-v", "--verbose", action="store_true")
     return p
+
 
 
 def main(argv: list[str] | None = None) -> int:

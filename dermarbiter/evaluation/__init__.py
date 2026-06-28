@@ -37,6 +37,10 @@ from dermarbiter.evaluation.boundary_runner import (
     BoundaryResult,
     BoundaryRunner,
 )
+from dermarbiter.evaluation.boundary_judge import (
+    LLMBoundaryJudge,
+    JudgeVerdict,
+)
 
 __all__ = [
     "AblationAnalyzer",
@@ -65,5 +69,8 @@ __all__ = [
     "BoundaryProbe",
     "BoundaryResult",
     "BoundaryRunner",
+    # boundary_judge (LLM-as-judge for Dimension 9)
+    "LLMBoundaryJudge",
+    "JudgeVerdict",
 ]
 

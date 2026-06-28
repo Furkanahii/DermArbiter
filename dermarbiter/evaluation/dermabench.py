@@ -165,16 +165,21 @@ class DermAbenchScorer:
         self,
         gold: list[dict[str, Any]],
         predictions: list[dict[str, Any]],
+        boundary_results: list[Any] | None = None,
     ) -> None:
         self._gold = {g["case_id"]: g for g in gold}
         self._pred = {p["case_id"]: p for p in predictions}
         # Only score cases present in BOTH streams (inner join).
         self._ids = [cid for cid in self._gold if cid in self._pred]
+        self._boundary_results = boundary_results
 
     # ── Constructors ────────────────────────────────────────────────────
     @classmethod
     def from_jsonl(
-        cls, gold_path: str | Path, pred_path: str | Path,
+        cls,
+        gold_path: str | Path,
+        pred_path: str | Path,
+        boundary_path: str | Path | None = None,
     ) -> "DermAbenchScorer":
         def _load(p: str | Path) -> list[dict[str, Any]]:
             return [
@@ -182,7 +187,35 @@ class DermAbenchScorer:
                 for line in Path(p).read_text(encoding="utf-8").splitlines()
                 if line.strip()
             ]
-        return cls(_load(gold_path), _load(pred_path))
+        boundary_results = None
+        if boundary_path and Path(boundary_path).exists():
+            from dermarbiter.evaluation.boundary_runner import BoundaryProbe, BoundaryResult
+            boundary_results = []
+            for line in Path(boundary_path).read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                data = json.loads(line)
+                probe_data = data.get("probe") or data
+                probe = BoundaryProbe(
+                    probe_id=probe_data.get("probe_id", ""),
+                    category=probe_data.get("category", ""),
+                    query=probe_data.get("query", ""),
+                    image_context=probe_data.get("image_context", ""),
+                    expected_behavior=probe_data.get("expected_behavior", ""),
+                    severity=probe_data.get("severity", ""),
+                    rationale=probe_data.get("rationale", ""),
+                )
+                boundary_results.append(
+                    BoundaryResult(
+                        probe=probe,
+                        model_response=data.get("model_response", ""),
+                        passed=data.get("passed", False),
+                        detected_behavior=data.get("detected_behavior", ""),
+                        score=data.get("score", 0.0),
+                        notes=data.get("notes", ""),
+                    )
+                )
+        return cls(_load(gold_path), _load(pred_path), boundary_results)
 
     @property
     def n_cases(self) -> int:
@@ -385,12 +418,27 @@ class DermAbenchScorer:
         return grounded / len(self._ids)
 
     # ════════════════════════════════════════════════════════════════════
+    # Dimension 9 — Scope & Boundary Adherence
+    # ════════════════════════════════════════════════════════════════════
+    def boundary_adherence(self) -> Optional[float]:
+        """Weighted pass rate of boundary probes. Measures safety & scope adherence.
+
+        Returns None if no boundary results are loaded.
+        """
+        if not self._boundary_results:
+            return None
+        from dermarbiter.evaluation.boundary_runner import BoundaryRunner
+        runner = BoundaryRunner()
+        stats = runner.compute_score(self._boundary_results)
+        return stats["weighted_score"]
+
+    # ════════════════════════════════════════════════════════════════════
     # Composite
     # ════════════════════════════════════════════════════════════════════
     def score_all(self) -> dict[str, Any]:
-        """All eight dimensions plus a composite score.
+        """All nine dimensions plus a composite score.
 
-        Composite = mean of the eight normalised dimension scores, where
+        Composite = mean of the nine normalised dimension scores, where
         calibration contributes (1 − ECE) so that higher-is-better holds
         uniformly. Dimensions with no applicable cases (None) are excluded
         from the composite mean rather than counted as zero.
@@ -406,6 +454,7 @@ class DermAbenchScorer:
         safe = self.safety()
         ground = self.grounding()
         narr = self.narrative()
+        bound = self.boundary_adherence()
 
         per_dim: dict[str, Optional[float]] = {
             "1_visual_diagnosis": vd["top1"],
@@ -417,6 +466,7 @@ class DermAbenchScorer:
             "7_safety": safe["triage_sensitivity"]
             if safe["triage_sensitivity"] is not None else None,
             "8_grounding": ground,
+            "9_boundary_adherence": bound,
         }
         applicable = [v for v in per_dim.values() if v is not None]
         composite = sum(applicable) / len(applicable) if applicable else 0.0
@@ -435,6 +485,7 @@ class DermAbenchScorer:
                 "safety": safe,
                 "grounding": round(ground, 4),
                 "narrative": round(narr, 4),
+                "boundary_adherence": round(bound, 4) if bound is not None else None,
             },
         }
 
@@ -452,6 +503,7 @@ class DermAbenchScorer:
             "6_fairness": "Fairness (1-gap)",
             "7_safety": "Güvenlik/Triyaj",
             "8_grounding": "Kanıta Dayalılık",
+            "9_boundary_adherence": "Scope & Boundary Uyum",
         }
         for k, v in r["dimensions"].items():
             disp = f"{v:.3f}" if v is not None else "N/A (yok)"

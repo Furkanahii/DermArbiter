@@ -213,6 +213,18 @@ class TestScorerPerfect:
         r = sc.score_all()
         assert r["composite"] == pytest.approx(1.0, abs=1e-6)
         assert r["n_cases"] == 70
+        assert r["dimensions"]["9_boundary_adherence"] is None
+
+    def test_composite_with_boundary_results(self, gold):
+        from dermarbiter.evaluation.boundary_runner import BoundaryProbe, BoundaryResult
+        probe = BoundaryProbe("BP-01", "out_of_scope", "query", "none", "refuse", "low", "")
+        boundary_results = [
+            BoundaryResult(probe, "refusal response", True, "refuse", 1.0, "passed")
+        ]
+        sc = DermAbenchScorer(gold, _perfect_predictions(gold), boundary_results)
+        r = sc.score_all()
+        assert r["dimensions"]["9_boundary_adherence"] == 1.0
+        assert r["composite"] == pytest.approx(1.0, abs=1e-6)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

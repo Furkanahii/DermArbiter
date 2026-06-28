@@ -27,6 +27,16 @@ from dermarbiter.evaluation.dermabench import (
 )
 from dermarbiter.evaluation.fairness_analyzer import FairnessAnalyzer, GroupMetrics
 from dermarbiter.evaluation.metrics import MetricsCalculator
+from dermarbiter.evaluation.query_suite import (
+    ClinicalQueryType,
+    QuerySuiteGenerator,
+    extend_case_with_queries,
+)
+from dermarbiter.evaluation.boundary_runner import (
+    BoundaryProbe,
+    BoundaryResult,
+    BoundaryRunner,
+)
 
 __all__ = [
     "AblationAnalyzer",
@@ -47,5 +57,13 @@ __all__ = [
     "snomed_for",
     # dermabench bridge
     "state_to_dermabench_prediction",
+    # query_suite
+    "ClinicalQueryType",
+    "QuerySuiteGenerator",
+    "extend_case_with_queries",
+    # boundary_runner
+    "BoundaryProbe",
+    "BoundaryResult",
+    "BoundaryRunner",
 ]
 

@@ -22,7 +22,21 @@ Ayrıca "DermAgent" (karşılaştırdığımız sistem) ve "DermaVQA" da dolu.
 | **DELPHI-Derm** | Delphi = uzman paneli/konsensüs; agentic debate metaforu | niş |
 
 **Öneri: DermArena** — multi-agent agentic değerlendirmeyi en iyi yansıtan,
-çakışmasız, akılda kalıcı ad. (Nihai karar Emre+Furkan+Abdurrahim'in.)
+çakışmasız, akılda kalıcı ad.
+
+> ✅ **KARAR (Emre):** Yeni ad **DermArena**. Abdurrahim'le teyit edilecek.
+
+### Yeniden adlandırma (rename) planı — koordineli tek PR
+Repo-geneli; açık PR'larla (#9, #10) çakışmamak için **#9/#10 merge olduktan
+sonra** tek bir "rename" PR'ında, Furkan ile koordineli yapılmalı:
+
+- [ ] `dermarbiter/evaluation/dermabench.py` → `dermarena.py`
+- [ ] `DermAbenchScorer` → `DermArenaScorer` (+ tüm import'lar)
+- [ ] `DERMABENCH_*.md`, `docs/*` içindeki adlar → DermArena
+- [ ] `data/dermabench/` → `data/dermarena/` (+ .gitignore, notebook yolları,
+      `make_colab_bundle.py`, `run_dermagent_subset.py` referansları)
+- [ ] Testlerdeki `dermabench` adları
+- [ ] README / protokol başlıkları
 
 ---
 

@@ -124,8 +124,13 @@ class BoundaryRunner:
         "low": 0.5,
     }
 
-    def __init__(self, probes_path: str | Path = "data/boundary_probes.jsonl") -> None:
+    def __init__(self, probes_path: str | Path = "data/boundary_probes.jsonl",
+                 judge: Any = None) -> None:
         self.probes_path = Path(probes_path)
+        # Optional LLM judge (e.g. LLMBoundaryJudge). When set, evaluate_response
+        # delegates to it instead of the keyword matcher. None → keyword fallback
+        # (offline, no API key — keeps the runner usable without credentials).
+        self.judge = judge
 
     def load_probes(self) -> list[BoundaryProbe]:
         """Loads boundary probes from JSONL file."""
@@ -152,7 +157,14 @@ class BoundaryRunner:
         return probes
 
     def evaluate_response(self, probe: BoundaryProbe, response: str) -> BoundaryResult:
-        """Evaluates whether the model response adheres to expected behavior."""
+        """Evaluates whether the model response adheres to expected behavior.
+
+        Delegates to ``self.judge`` (an LLM judge) when one is configured;
+        otherwise falls back to the offline keyword matcher below.
+        """
+        if self.judge is not None:
+            return self.judge.evaluate_response(probe, response)
+
         response_lower = response.lower()
         expected = probe.expected_behavior
 

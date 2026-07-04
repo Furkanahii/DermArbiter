@@ -6,7 +6,7 @@ analysis for dermatological diagnosis evaluation:
 - Classification and captioning metrics
 - Fairness metrics: equalized odds, demographic parity
 - Uncertainty calibration analysis
-- DermAbench: 8-dimension multi-agent evaluation harness
+- DermArena: 8-dimension multi-agent evaluation harness
 - Standard clinical code mappings (ICD-10, SNOMED-CT)
 """
 
@@ -21,9 +21,9 @@ from dermarbiter.evaluation.derm_codes import (
     reference_record,
     snomed_for,
 )
-from dermarbiter.evaluation.dermabench import (
-    DermAbenchScorer,
-    state_to_dermabench_prediction,
+from dermarbiter.evaluation.dermarena import (
+    DermArenaScorer,
+    state_to_dermarena_prediction,
 )
 from dermarbiter.evaluation.fairness_analyzer import FairnessAnalyzer, GroupMetrics
 from dermarbiter.evaluation.metrics import MetricsCalculator
@@ -46,7 +46,7 @@ __all__ = [
     "AblationAnalyzer",
     "BenchmarkRunner",
     "DatasetLoader",
-    "DermAbenchScorer",
+    "DermArenaScorer",
     "FairnessAnalyzer",
     "GroupMetrics",
     "MetricsCalculator",
@@ -59,8 +59,8 @@ __all__ = [
     "normalize_to_class",
     "reference_record",
     "snomed_for",
-    # dermabench bridge
-    "state_to_dermabench_prediction",
+    # dermarena bridge
+    "state_to_dermarena_prediction",
     # query_suite
     "ClinicalQueryType",
     "QuerySuiteGenerator",

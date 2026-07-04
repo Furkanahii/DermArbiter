@@ -1,4 +1,4 @@
-"""Bundle a curated DermAbench set + only its referenced images into a zip
+"""Bundle a curated DermArena set + only its referenced images into a zip
 for transport to Colab (via Google Drive).
 
 The curated gold JSONL and raw images are gitignored, so a Colab clone of
@@ -9,14 +9,14 @@ validated locally — guaranteeing identical, deterministic data.
 The zip preserves repo-relative paths so it unzips straight into the repo
 root on Colab:
 
-    data/dermabench/<set>.jsonl
-    data/dermabench/raw/scin/dataset/images/<id>.png
-    data/dermabench/raw/ddi/images/<id>.png
+    data/dermarena/<set>.jsonl
+    data/dermarena/raw/scin/dataset/images/<id>.png
+    data/dermarena/raw/ddi/images/<id>.png
 
 Usage:
     python scripts/make_colab_bundle.py \
-        --gold data/dermabench/dermabench_v1lite.jsonl \
-        --out  data/dermabench/dermabench_v1lite_bundle.zip
+        --gold data/dermarena/dermarena_v1lite.jsonl \
+        --out  data/dermarena/dermarena_v1lite_bundle.zip
 """
 
 from __future__ import annotations
@@ -56,8 +56,8 @@ def build_bundle(gold_path: Path, out_path: Path) -> tuple[int, int, int]:
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--gold", default="data/dermabench/dermabench_v1lite.jsonl")
-    p.add_argument("--out", default="data/dermabench/dermabench_v1lite_bundle.zip")
+    p.add_argument("--gold", default="data/dermarena/dermarena_v1lite.jsonl")
+    p.add_argument("--out", default="data/dermarena/dermarena_v1lite_bundle.zip")
     args = p.parse_args(argv)
 
     gold = Path(args.gold)

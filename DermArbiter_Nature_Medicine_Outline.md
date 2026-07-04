@@ -6,7 +6,7 @@
 
 ## Abstract
 * **Background:** Clinician shortages in primary care lead to delayed skin cancer diagnoses. AI classifiers show high SOTA performance but fail to emulate the multi-dimensional, collaborative reasoning of a dermatologist panel, frequently neglecting patient history, failing standard coding (ICD/SNOMED), or exhibiting calibration and demographic bias.
-* **Methods:** We introduce **DermArbiter**, an agentic framework structured via LangGraph. It coordinates a panel of four specialized LLM agents (Specialist, Generalist, Skeptic, Moderator) collaborating through a shared blackboard state machine. The panel proposes diagnostic tools (classifiers, RAG, clinical ontologies), critiques discrepancies, debates diagnostic uncertainty, and synthesizes a structured differential diagnosis mapped to ICD-10 and SNOMED-CT codes. We evaluate DermArbiter against standard baseline classifiers and frontier LLMs across three benchmark layers: (1) SOTA replication (DermAgent), (2) a novel multi-dimensional clinical benchmark (DermAbench), and (3) ablation analysis of agentic deltas.
+* **Methods:** We introduce **DermArbiter**, an agentic framework structured via LangGraph. It coordinates a panel of four specialized LLM agents (Specialist, Generalist, Skeptic, Moderator) collaborating through a shared blackboard state machine. The panel proposes diagnostic tools (classifiers, RAG, clinical ontologies), critiques discrepancies, debates diagnostic uncertainty, and synthesizes a structured differential diagnosis mapped to ICD-10 and SNOMED-CT codes. We evaluate DermArbiter against standard baseline classifiers and frontier LLMs across three benchmark layers: (1) SOTA replication (DermAgent), (2) a novel multi-dimensional clinical benchmark (DermArena), and (3) ablation analysis of agentic deltas.
 * **Findings:** [Placeholder for evaluation stats: e.g., DermArbiter achieves superior Top-3 diagnostic accuracy compared to single LLMs and base classifiers. Crucially, the multi-agent consensus debate significantly improves Expected Calibration Error (ECE) and reduces accuracy gaps across Fitzpatrick skin type subgroups (I–VI) by X%, while providing 100% compliant ontology mappings.]
 * **Interpretation:** Cooperative agentic architectures can bridge the gap between classification-only AI and holistically grounded clinical decision support.
 
@@ -26,8 +26,8 @@
 * **Key Figures:** 
   - **Table 1:** Comparative accuracy, sensitivity, and specificity of DermArbiter vs. DermAgent vs. single base models.
 
-### 2.2 Layer 2: DermAbench Multi-Dimensional Clinical Evaluation
-* **Goal:** Demonstrate agentic superiority on the 8 clinical dimensions defined in `DERMABENCH_PROTOCOL.md`.
+### 2.2 Layer 2: DermArena Multi-Dimensional Clinical Evaluation
+* **Goal:** Demonstrate agentic superiority on the 8 clinical dimensions defined in `DERMARENA_PROTOCOL.md`.
 * **Key Figures:**
   - **Figure 1:** Radial chart comparing DermArbiter vs. GPT-4o-single across Visual, Narrative, Coding, DDx Quality, Calibration, Fairness, Safety, and Grounding.
   - **Table 2:** ICD-10 and SNOMED-CT exact mapping accuracy, demonstrating the impact of `OntologyGraph` integration.

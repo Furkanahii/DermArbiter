@@ -1,4 +1,4 @@
-# DermAbench: From Classifier Benchmarks to Agentic AI Evaluation
+# DermArena: From Classifier Benchmarks to Agentic AI Evaluation
 
 ## 1. Motivation
 Traditional classification benchmarks evaluate a model's clinical accuracy based on static visual outputs (e.g., HAM10000 7-class accuracy). However, in modern agentic healthcare AI systems like DermArbiter and DermAgent, the model is not a simple feedforward classifier. It uses tools, queries clinical databases, performs structured debate, expresses calibrated confidence levels, and synthesizes complex narratives. 
@@ -10,7 +10,7 @@ Measuring only visual diagnostic accuracy ignores:
 - **Responsible AI:** Does it perform equitably across Fitzpatrick skin types (Fairness)?
 - **Safety Bounds:** Does it adhere to its operational limits, refuse out-of-scope tasks, and avoid hallucinated modalities?
 
-DermAbench addresses these gaps by evaluating multi-agent cooperative workflows across a multi-dimensional framework.
+DermArena addresses these gaps by evaluating multi-agent cooperative workflows across a multi-dimensional framework.
 
 ---
 
@@ -30,13 +30,13 @@ Evaluation of clinical AI systems can be conceptualized across four distinct tie
   - Measures triage safety, demographic parity, adversarial robustness, and scope boundaries.
   - *Example:* Fitzpatrick gap, boundary probe pass rate.
 
-DermAbench spans Tiers 0 to 3 using its 9-dimension scoring harness.
+DermArena spans Tiers 0 to 3 using its 9-dimension scoring harness.
 
 ---
 
 ## 3. The 9-Dimension Framework
 
-DermAbench evaluates systems on 9 distinct, normalized dimensions scored from 0.0 to 1.0:
+DermArena evaluates systems on 9 distinct, normalized dimensions scored from 0.0 to 1.0:
 
 1. **Görsel Tanı (Visual Diagnosis):** Top-1/Top-3 diagnostic classification accuracy.
 2. **Klinik Öykü Anlama (Narrative):** Recall of key clinical history features in the reasoning text.
@@ -51,7 +51,7 @@ DermAbench evaluates systems on 9 distinct, normalized dimensions scored from 0.
 ---
 
 ## 4. The 11 Clinical Question Types
-Instead of querying a single static diagnosis question, DermAbench supports 11 distinct question types to evaluate different dimensions of clinical utility:
+Instead of querying a single static diagnosis question, DermArena supports 11 distinct question types to evaluate different dimensions of clinical utility:
 
 | ID | Soru Tipi (Query Type) | Auto-Scorable? | Scoring Method | Target Dimension |
 |---|---|---|---|---|
@@ -98,7 +98,7 @@ Where weights are: `critical` (2.0), `high` (1.5), `medium` (1.0), and `low` (0.
 
 ## 6. Comparison with Existing Benchmarks
 
-| Feature | HAM10000 | Fitzpatrick17k | DermAgent Eval | DermAbench (Ours) |
+| Feature | HAM10000 | Fitzpatrick17k | DermAgent Eval | DermArena (Ours) |
 |---|---|---|---|---|
 | Optical Diagnostic Acc | Yes | Yes | Yes | Yes |
 | Fitzpatrick Gap | No | Yes | No | Yes |

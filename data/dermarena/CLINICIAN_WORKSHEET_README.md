@@ -1,14 +1,14 @@
-# DermAbench v1-lite — Klinisyen Anotasyon Föyü (B3)
+# DermArena v1-lite — Klinisyen Anotasyon Föyü (B3)
 
 Merhaba Abdurrahim Hocam,
 
-Bu paket, DermAbench benchmark'ının ilk küçük (v1-lite) sürümü için
+Bu paket, DermArena benchmark'ının ilk küçük (v1-lite) sürümü için
 **gold-standard** etiketlemenizi rica ettiğimiz vakaları içeriyor.
 
 ## Paket içeriği
 
-- `dermabench_v1lite_worksheet.csv` — doldurmanızı rica ettiğimiz föy (198 vaka)
-- `dermabench_v1lite.jsonl` — (teknik) ham vaka verisi, sizin doldurmanıza gerek yok
+- `dermarena_v1lite_worksheet.csv` — doldurmanızı rica ettiğimiz föy (198 vaka)
+- `dermarena_v1lite.jsonl` — (teknik) ham vaka verisi, sizin doldurmanıza gerek yok
 
 ## Vaka seçimi
 
@@ -54,10 +54,10 @@ CSV'yi bize geri gönderin; biz şu komutla dondurulmuş (frozen) gold
 setine çeviriyoruz:
 
 ```
-python scripts/curate_dermabench.py apply \
-  --subset data/dermabench/dermabench_v1lite.jsonl \
+python scripts/curate_dermarena.py apply \
+  --subset data/dermarena/dermarena_v1lite.jsonl \
   --worksheet <sizin_doldurdugunuz>.csv \
-  --out data/dermabench/dermabench_v1lite_frozen.jsonl
+  --out data/dermarena/dermarena_v1lite_frozen.jsonl
 ```
 
 Yalnızca `approve = Y` olan vakalar frozen sete girer; sizin yazdığınız

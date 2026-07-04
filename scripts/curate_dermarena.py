@@ -1,8 +1,8 @@
-"""Curate a DermAbench v1-lite subset + clinician annotation worksheet (B3).
+"""Curate a DermArena v1-lite subset + clinician annotation worksheet (B3).
 
 Two modes:
 
-    build   Take one or more source DermAbench JSONL files (SCIN, DDI, …),
+    build   Take one or more source DermArena JSONL files (SCIN, DDI, …),
             fairness-stratified-sample ~N cases (balanced across Fitzpatrick
             skin types so the dark-skin subgroup has enough N for a CI, and
             diverse across conditions), write:
@@ -12,7 +12,7 @@ Two modes:
     apply   Read a clinician-filled worksheet + the curated JSONL, merge the
             clinician fields (reference differential, management, malignancy,
             approval) back into each case, set annotation_status="frozen",
-            and write the frozen gold set used by DermAbenchScorer.
+            and write the frozen gold set used by DermArenaScorer.
 
 Fairness-aware sampling: real SCIN is heavily light-skin (II=1007 vs VI=27).
 Proportional sampling would leave ~1 dark-skin case — useless for a fairness
@@ -32,7 +32,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Iterable
 
-logger = logging.getLogger("curate_dermabench")
+logger = logging.getLogger("curate_dermarena")
 
 # Clinician worksheet columns (B3). Auto-* are pre-filled; the rest are blank
 # for the dermatologist to complete. image_url is a clickable public link so
@@ -308,7 +308,7 @@ def _summarise(cases: list[dict[str, Any]]) -> None:
     malig = sum(1 for c in cases if _is_malignant(c))
     n = max(1, len(cases))
     print("\n" + "=" * 60)
-    print(f" DermAbench v1-lite curation — {len(cases)} cases")
+    print(f" DermArena v1-lite curation — {len(cases)} cases")
     print("=" * 60)
     print(f"  Fitzpatrick: {dict(sorted(fitz.items()))}")
     print(f"  Distinct conditions: {len(dx)}")
@@ -320,23 +320,23 @@ def _summarise(cases: list[dict[str, Any]]) -> None:
 
 
 def _build_argparser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="Curate DermAbench v1-lite + worksheet.")
+    p = argparse.ArgumentParser(description="Curate DermArena v1-lite + worksheet.")
     sub = p.add_subparsers(dest="mode", required=True)
 
     b = sub.add_parser("build", help="source JSONL(s) → curated subset + worksheet")
     b.add_argument("--sources", nargs="+", required=True,
-                   help="One or more DermAbench source JSONL files.")
+                   help="One or more DermArena source JSONL files.")
     b.add_argument("--target-n", type=int, default=200)
     b.add_argument("--min-malignant", type=int, default=0,
                    help="Floor on malignant cases (group-preserving swaps) so "
                         "the safety dimension has enough N. 0 = off.")
-    b.add_argument("--out", default="data/dermabench/dermabench_v1lite.jsonl")
+    b.add_argument("--out", default="data/dermarena/dermarena_v1lite.jsonl")
     b.add_argument("--seed", type=int, default=42)
 
     a = sub.add_parser("apply", help="filled worksheet + subset JSONL → frozen gold")
     a.add_argument("--subset", required=True, help="The curated v1-lite JSONL.")
     a.add_argument("--worksheet", required=True, help="Clinician-filled CSV.")
-    a.add_argument("--out", default="data/dermabench/dermabench_v1lite_frozen.jsonl")
+    a.add_argument("--out", default="data/dermarena/dermarena_v1lite_frozen.jsonl")
     return p
 
 

@@ -4,9 +4,9 @@ Maps the canonical HAM10000 7-class labels (and common free-text synonyms)
 to their ICD-10 and SNOMED-CT codes, plus a malignancy flag and the
 default clinical management tier. Used by:
 
-  * ``scripts/build_dermabench.py`` — to enrich gold-standard cases with
-    reference codes during DermAbench curation.
-  * ``dermarbiter/evaluation/dermabench.py`` — Dimension 3 (Coding) scores
+  * ``scripts/build_dermarena.py`` — to enrich gold-standard cases with
+    reference codes during DermArena curation.
+  * ``dermarbiter/evaluation/dermarena.py`` — Dimension 3 (Coding) scores
     predicted codes against these references.
 
 These are reference mappings for benchmark ground truth, NOT injected into
@@ -213,7 +213,7 @@ def default_management(diagnosis: str) -> Optional[str]:
 
 
 def reference_record(diagnosis: str) -> dict[str, object]:
-    """Full reference enrichment for a diagnosis — used by the DermAbench
+    """Full reference enrichment for a diagnosis — used by the DermArena
     builder to populate a gold case's ground_truth block.
 
     Returns a dict with class, icd10, snomed, is_malignant, management.

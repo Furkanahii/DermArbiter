@@ -113,12 +113,12 @@ def _normalize_label(raw: str) -> str:
 def _gold_label(case: dict[str, Any]) -> str:
     """The HAM-space gold label for the DermAgent metrics record.
 
-    The DermAgent subset stores it flat as ``ground_truth_label``; DermAbench
+    The DermAgent subset stores it flat as ``ground_truth_label``; DermArena
     gold cases (SCIN/DDI) nest it under ``ground_truth`` instead. Prefer the
     flat field, then the nested HAM class, then the free-text label. Returns
     "" when none is present (many SCIN conditions fall outside the 7-class
     space — harmless: the DermAgent accuracy is partial, the real evaluation
-    is DermAbenchScorer over the separate predictions file)."""
+    is DermArenaScorer over the separate predictions file)."""
     if case.get("ground_truth_label"):
         return case["ground_truth_label"]
     gt = case.get("ground_truth", {}) or {}
@@ -192,7 +192,7 @@ def _run_one_mock(case: dict[str, Any]) -> dict[str, Any]:
     )
 
     try:
-        from dermarbiter.evaluation.dermabench import state_to_dermabench_prediction
+        from dermarbiter.evaluation.dermarena import state_to_dermarena_prediction
         state = {
             "final_diagnosis": [pred, "nv", "bkl"],
             "consensus_score": 0.6,
@@ -201,13 +201,13 @@ def _run_one_mock(case: dict[str, Any]) -> dict[str, Any]:
                 "specialist": type("MockBrief", (), {"cited_cards": ["EC-1", "EC-2"]})(),
             }
         }
-        rec["_dermabench"] = state_to_dermabench_prediction(
+        rec["_dermarena"] = state_to_dermarena_prediction(
             case["case_id"], state,
             fitzpatrick_type=case.get("fitzpatrick_type", ""),
             latency_s=0.001,
         )
     except Exception as exc:
-        logger.warning("DermAbench mock record build failed for %s: %s",
+        logger.warning("DermArena mock record build failed for %s: %s",
                        case["case_id"], exc)
 
     return rec
@@ -270,19 +270,19 @@ def _run_one_real(
         latency_s=latency_s,
     )
 
-    # Attach a DermAbench prediction record (the right-hand side of the
-    # DermAbench scorer join). Carried under a private key so the metrics
+    # Attach a DermArena prediction record (the right-hand side of the
+    # DermArena scorer join). Carried under a private key so the metrics
     # JSONL stays unchanged; the run loop strips + writes it to a separate
-    # file when --dermabench-out is set.
+    # file when --dermarena-out is set.
     try:
-        from dermarbiter.evaluation.dermabench import state_to_dermabench_prediction
-        rec["_dermabench"] = state_to_dermabench_prediction(
+        from dermarbiter.evaluation.dermarena import state_to_dermarena_prediction
+        rec["_dermarena"] = state_to_dermarena_prediction(
             case["case_id"], state,
             fitzpatrick_type=case.get("fitzpatrick_type", ""),
             latency_s=latency_s,
         )
-    except Exception as exc:  # never let DermAbench emit break the main run
-        logger.warning("DermAbench record build failed for %s: %s",
+    except Exception as exc:  # never let DermArena emit break the main run
+        logger.warning("DermArena record build failed for %s: %s",
                        case["case_id"], exc)
 
     return rec
@@ -604,11 +604,11 @@ def run(args: argparse.Namespace) -> int:
     metrics_path = base.with_suffix(".metrics.json")
     logger.info("Output JSONL: %s  (append mode, fsync per case)", jsonl_path)
 
-    # Optional parallel DermAbench prediction stream.
-    dab_path = Path(args.dermabench_out) if getattr(args, "dermabench_out", None) else None
+    # Optional parallel DermArena prediction stream.
+    dab_path = Path(args.dermarena_out) if getattr(args, "dermarena_out", None) else None
     dab_fh = dab_path.open("a", encoding="utf-8") if dab_path else None
     if dab_fh:
-        logger.info("DermAbench predictions → %s", dab_path)
+        logger.info("DermArena predictions → %s", dab_path)
 
     new_records: list[dict[str, Any]] = []
     t0 = time.perf_counter()
@@ -626,8 +626,8 @@ def run(args: argparse.Namespace) -> int:
                         "predicted_label": "",
                         "error": str(exc),
                     }
-                # Split off the DermAbench record (private key) → its own file.
-                dab_rec = rec.pop("_dermabench", None)
+                # Split off the DermArena record (private key) → its own file.
+                dab_rec = rec.pop("_dermarena", None)
                 if dab_fh and dab_rec is not None:
                     dab_fh.write(json.dumps(dab_rec, ensure_ascii=False) + "\n")
                     dab_fh.flush()
@@ -712,10 +712,10 @@ def _build_argparser() -> argparse.ArgumentParser:
                         "present are skipped and new records are appended to "
                         "the same file. Use this after a Colab disconnect to "
                         "continue from where you left off without losing work.")
-    p.add_argument("--dermabench-out", default=None,
-                   help="If set, also write a parallel DermAbench prediction "
+    p.add_argument("--dermarena-out", default=None,
+                   help="If set, also write a parallel DermArena prediction "
                         "JSONL (one record per case) to this path, scoreable "
-                        "by dermarbiter.evaluation.dermabench.DermAbenchScorer "
+                        "by dermarbiter.evaluation.dermarena.DermArenaScorer "
                         "against a frozen gold set. Real-mode only.")
     p.add_argument("--query-mode", choices=["clinical", "non_clinical"], default="clinical",
                    help="Evaluate on patient-specific clinical queries or factual non-clinical queries.")

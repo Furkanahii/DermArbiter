@@ -1,15 +1,15 @@
-"""DermAbench — 8-dimensional agentic dermatology benchmark scorer.
+"""DermArena — 8-dimensional agentic dermatology benchmark scorer.
 
-Implements the scoring harness defined in ``DERMABENCH_PROTOCOL.md`` §5.
+Implements the scoring harness defined in ``DERMARENA_PROTOCOL.md`` §5.
 Where standard benchmarks reduce evaluation to 7-class image accuracy,
-DermAbench measures clinical decision quality across eight dimensions,
+DermArena measures clinical decision quality across eight dimensions,
 each exercising a different part of the agentic stack.
 
 Data contract
 -------------
 The scorer joins two JSONL streams by ``case_id``:
 
-  GOLD case (frozen benchmark ground truth, built by build_dermabench.py)::
+  GOLD case (frozen benchmark ground truth, built by build_dermarena.py)::
 
       {
         "case_id": "DAB-0001",
@@ -72,15 +72,15 @@ def _fitz_group(fitz: str) -> Optional[str]:
     return None
 
 
-# ── BlackboardState → DermAbench prediction bridge ──────────────────────────
-def state_to_dermabench_prediction(
+# ── BlackboardState → DermArena prediction bridge ──────────────────────────
+def state_to_dermarena_prediction(
     case_id: str,
     state: Any,
     *,
     fitzpatrick_type: str = "",
     latency_s: Optional[float] = None,
 ) -> dict[str, Any]:
-    """Convert a finished pipeline BlackboardState into a DermAbench
+    """Convert a finished pipeline BlackboardState into a DermArena
     prediction record (the right-hand side of the scorer's join).
 
     Accepts either a Pydantic BlackboardState or a plain dict. Pulls:
@@ -96,7 +96,7 @@ def state_to_dermabench_prediction(
         pre-malignant ⇒ biopsy ⇒ urgent). Documented as a proxy until the
         pipeline emits an explicit Skeptic triage signal.
 
-    The DermAbench dimensions this feeds: 1 (visual), 3 (coding), 4 (ddx),
+    The DermArena dimensions this feeds: 1 (visual), 3 (coding), 4 (ddx),
     5 (calibration), 7 (safety), 8 (grounding). Dimension 2 (narrative)
     reads `reasoning`; Dimension 6 (fairness) reads the gold fitzpatrick.
     """
@@ -154,8 +154,8 @@ def state_to_dermabench_prediction(
     return rec
 
 
-class DermAbenchScorer:
-    """Scores pipeline predictions against frozen DermAbench gold cases.
+class DermArenaScorer:
+    """Scores pipeline predictions against frozen DermArena gold cases.
 
     Construct from two aligned JSONL files (or in-memory lists), then call
     individual dimension methods or ``score_all()``.
@@ -180,7 +180,7 @@ class DermAbenchScorer:
         gold_path: str | Path,
         pred_path: str | Path,
         boundary_path: str | Path | None = None,
-    ) -> "DermAbenchScorer":
+    ) -> "DermArenaScorer":
         def _load(p: str | Path) -> list[dict[str, Any]]:
             return [
                 json.loads(line)
@@ -492,7 +492,7 @@ class DermAbenchScorer:
     def print_report(self) -> None:
         r = self.score_all()
         print("\n" + "=" * 60)
-        print(f" DermAbench Report — {r['n_cases']} cases")
+        print(f" DermArena Report — {r['n_cases']} cases")
         print("=" * 60)
         names = {
             "1_visual_diagnosis": "Görsel Tanı (top-1)",

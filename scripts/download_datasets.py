@@ -496,10 +496,10 @@ def download_bcn20000(target_dir: Path, **_kw) -> DownloadReport:
 def download_ddi(target_dir: Path, **_kw) -> DownloadReport:
     """DDI (Stanford Diverse Dermatology Images) — manual access.
 
-    DDI is the fairness anchor for DermAbench (Fitzpatrick skin-tone groups
+    DDI is the fairness anchor for DermArena (Fitzpatrick skin-tone groups
     + biopsy-confirmed malignancy). Gated behind a Stanford AIMI
     registration + data-use agreement; cannot be fetched automatically.
-    Stages the layout expected by ``build_dermabench.py --source ddi``.
+    Stages the layout expected by ``build_dermarena.py --source ddi``.
     """
     report = DownloadReport(dataset="DDI", target_dir=target_dir)
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -519,11 +519,11 @@ def download_ddi(target_dir: Path, **_kw) -> DownloadReport:
         f"     {target_dir}/ddi_metadata.csv   (DDI_file, skin_tone,\n"
         f"                                      malignant, disease)\n"
         f"     {target_dir}/images/*.png\n"
-        f"  3. Build DermAbench DDI cases:\n"
-        f"     python scripts/build_dermabench.py --source ddi \\\n"
-        f"         --raw-dir {target_dir} --out data/dermabench/ddi.jsonl\n\n"
+        f"  3. Build DermArena DDI cases:\n"
+        f"     python scripts/build_dermarena.py --source ddi \\\n"
+        f"         --raw-dir {target_dir} --out data/dermarena/ddi.jsonl\n\n"
         "skin_tone 12/34/56 → Fitzpatrick I-II / III-IV / V-VI; the\n"
-        "'malignant' flag is biopsy-confirmed ground truth for DermAbench\n"
+        "'malignant' flag is biopsy-confirmed ground truth for DermArena\n"
         "Dimensions 6 (fairness) and 7 (safety)."
     )
     print("\n" + msg + "\n")
@@ -544,8 +544,8 @@ def download_scin(target_dir: Path, **_kw) -> DownloadReport:
         f"  1. gsutil cp gs://dx-scin-public-data/dataset/scin_cases.csv {target_dir}/\n"
         f"     gsutil cp gs://dx-scin-public-data/dataset/scin_labels.csv {target_dir}/\n"
         f"  2. gsutil -m cp -r gs://dx-scin-public-data/dataset/images {target_dir}/\n"
-        f"  3. python scripts/build_dermabench.py --source scin \\\n"
-        f"         --raw-dir {target_dir} --out data/dermabench/scin.jsonl\n\n"
+        f"  3. python scripts/build_dermarena.py --source scin \\\n"
+        f"         --raw-dir {target_dir} --out data/dermarena/scin.jsonl\n\n"
         "Dermatologist labels + Fitzpatrick feed narrative (Dim 2) and\n"
         "fairness (Dim 6)."
     )

@@ -1,7 +1,7 @@
-# DermAbench — Klinisyen Soru & Sınır Testleri İnceleme Çalışma Sayfası (Clinician Review Worksheet)
+# DermArena — Klinisyen Soru & Sınır Testleri İnceleme Çalışma Sayfası (Clinician Review Worksheet)
 
 > **Sayın Dr. Abdurrahim Yılmaz ve Değerli Klinisyenlerimiz,**  
-> Bu doküman, DermAbench benchmark tasarımındaki **11 Klinik Soru Tipi** ve **45 Sınır Testini (Boundary Probes)** onayınıza ve incelemenize sunmak üzere hazırlanmıştır. Lütfen soruları ve beklenen davranışları klinik uygunluk açısından değerlendirip geri bildirimlerinizi iletiniz.
+> Bu doküman, DermArena benchmark tasarımındaki **11 Klinik Soru Tipi** ve **45 Sınır Testini (Boundary Probes)** onayınıza ve incelemenize sunmak üzere hazırlanmıştır. Lütfen soruları ve beklenen davranışları klinik uygunluk açısından değerlendirip geri bildirimlerinizi iletiniz.
 
 ---
 

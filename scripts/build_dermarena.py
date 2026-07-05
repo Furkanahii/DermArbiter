@@ -1,16 +1,16 @@
-"""Build the DermAbench gold-standard case set (Phase B2).
+"""Build the DermArena gold-standard case set (Phase B2).
 
 Assembles multi-dimensional dermatology cases from public sources into the
-unified DermAbench JSONL schema consumed by
-``dermarbiter.evaluation.dermabench.DermAbenchScorer``.
+unified DermArena JSONL schema consumed by
+``dermarbiter.evaluation.dermarena.DermArenaScorer``.
 
-Per the protocol (DERMABENCH_PROTOCOL.md), each gold case carries enough
+Per the protocol (DERMARENA_PROTOCOL.md), each gold case carries enough
 ground truth to score all 8 dimensions:
 
     {
       "case_id": "DAB-0001",
       "source": "scin|ddi|derm1m|pubmed|synthetic",
-      "image_path": "data/dermabench/images/DAB-0001.jpg",
+      "image_path": "data/dermarena/images/DAB-0001.jpg",
       "fitzpatrick_type": "IV",
       "clinical_history": "45yo male, 3-month enlarging pigmented lesion ...",
       "query": "What is the most likely diagnosis and management?",
@@ -66,9 +66,9 @@ if str(_ROOT) not in sys.path:
 
 from dermarbiter.evaluation.derm_codes import reference_record, all_classes
 
-logger = logging.getLogger("build_dermabench")
+logger = logging.getLogger("build_dermarena")
 
-DEFAULT_OUT = "data/dermabench/dermabench_v1.jsonl"
+DEFAULT_OUT = "data/dermarena/dermarena_v1.jsonl"
 
 
 # ── ICD/SNOMED enrichment ───────────────────────────────────────────────────
@@ -152,7 +152,7 @@ def build_synthetic(n: int, seed: int = 42) -> list[dict[str, Any]]:
         cases.append({
             "case_id": cid,
             "source": "synthetic",
-            "image_path": f"data/dermabench/images/{cid}.jpg",
+            "image_path": f"data/dermarena/images/{cid}.jpg",
             "fitzpatrick_type": fitz,
             "clinical_history": history,
             "query": "What is the most likely diagnosis and recommended management?",
@@ -165,7 +165,7 @@ def build_synthetic(n: int, seed: int = 42) -> list[dict[str, Any]]:
 
 
 # ── Real-source loaders ─────────────────────────────────────────────────────
-# Each parses a staged raw dataset into the unified DermAbench schema with
+# Each parses a staged raw dataset into the unified DermArena schema with
 # auto ICD/SNOMED enrichment. They emit annotation_status="pending" because
 # reference_differential + history_key_features still need the clinician
 # blind-review (Phase B3) before freezing. Source-provided fields (DDI's
@@ -251,7 +251,7 @@ def load_ddi(raw_dir: Path) -> list[dict[str, Any]]:
 
 
 def load_derm1m(raw_dir: Path) -> list[dict[str, Any]]:
-    """Derm1M manifest → DermAbench cases.
+    """Derm1M manifest → DermArena cases.
 
     Reuses the manifest schema parsed by build_case_rag_index: columns
     ``filename, disease_label, source, body_location, age, gender`` plus a
@@ -340,7 +340,7 @@ def _scin_differential(label_row: dict[str, str], top_n: int = 3) -> list[str]:
 
     SCIN aggregates several dermatologists' reads into a weighted dict; the
     higher-weight entries form a real (silver) differential, not a single
-    label. Used to seed ground_truth.reference_differential so DermAbench's
+    label. Used to seed ground_truth.reference_differential so DermArena's
     DDx dimension is scoreable before clinician B3 review. Ordered by
     descending weight; falls back to the list-string when no weighted dict.
     """
@@ -391,7 +391,7 @@ def load_scin(raw_dir: Path) -> list[dict[str, Any]]:
     Urticaria, Tinea, Psoriasis, …) — mostly OUTSIDE the HAM10000 7-class
     space. derm_codes enriches the overlap; the rest get empty ICD/SNOMED
     that the clinician completes in B3. This breadth is intentional:
-    DermAbench tests holistic clinical competence, not just cancer-screening.
+    DermArena tests holistic clinical competence, not just cancer-screening.
 
     Only cases with a confident dermatologist label are emitted.
     """
@@ -503,7 +503,7 @@ def summarise(cases: list[dict[str, Any]]) -> None:
     fitz = Counter(c.get("fitzpatrick_type", "?") for c in cases)
     frozen = sum(1 for c in cases if c.get("annotation_status") == "frozen")
     print("\n" + "=" * 60)
-    print(f" DermAbench build — {len(cases)} cases")
+    print(f" DermArena build — {len(cases)} cases")
     print("=" * 60)
     print(f"  Frozen (annotation complete): {frozen}/{len(cases)}")
     print(f"  Class distribution: {dict(sorted(dist.items()))}")
@@ -512,12 +512,12 @@ def summarise(cases: list[dict[str, Any]]) -> None:
 
 
 def _build_argparser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="Build DermAbench gold case set.")
+    p = argparse.ArgumentParser(description="Build DermArena gold case set.")
     p.add_argument("--source", required=True,
                    choices=["synthetic", "scin", "ddi", "derm1m", "pubmed"])
     p.add_argument("--n", type=int, default=60,
                    help="Synthetic only: number of cases to generate.")
-    p.add_argument("--raw-dir", default="data/dermabench/raw",
+    p.add_argument("--raw-dir", default="data/dermarena/raw",
                    help="Where staged raw source files live (real sources).")
     p.add_argument("--out", default=DEFAULT_OUT)
     p.add_argument("--seed", type=int, default=42)

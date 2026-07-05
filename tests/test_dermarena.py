@@ -1,4 +1,4 @@
-"""Tests for DermAbench: code lookup, builder, and 8-dimension scorer.
+"""Tests for DermArena: code lookup, builder, and 8-dimension scorer.
 
 All offline, no network/GPU. Uses the synthetic builder as a fixture so
 the scorer is exercised end-to-end on self-consistent gold cases.
@@ -14,14 +14,14 @@ import pytest
 from types import SimpleNamespace
 
 from dermarbiter.evaluation import derm_codes as dc
-from dermarbiter.evaluation.dermabench import (
-    DermAbenchScorer, state_to_dermabench_prediction,
+from dermarbiter.evaluation.dermarena import (
+    DermArenaScorer, state_to_dermarena_prediction,
 )
 
 import sys
 _SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(_SCRIPTS))
-import build_dermabench as bdb  # noqa: E402
+import build_dermarena as bdb  # noqa: E402
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -79,7 +79,7 @@ class TestDermCodes:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# build_dermabench
+# build_dermarena
 # ─────────────────────────────────────────────────────────────────────────────
 class TestBuilder:
     def test_synthetic_balanced(self):
@@ -119,7 +119,7 @@ class TestBuilder:
     def test_missing_raw_file_raises(self):
         # Real loader on an empty dir → FileNotFoundError (fail loud).
         with pytest.raises(FileNotFoundError):
-            bdb.load_source("ddi", Path("/tmp/dermabench_nowhere_xyz"))
+            bdb.load_source("ddi", Path("/tmp/dermarena_nowhere_xyz"))
 
     def test_pubmed_still_stub(self):
         with pytest.raises(NotImplementedError):
@@ -140,7 +140,7 @@ class TestBuilder:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# DermAbenchScorer — perfect predictions
+# DermArenaScorer — perfect predictions
 # ─────────────────────────────────────────────────────────────────────────────
 def _perfect_predictions(gold: list[dict]) -> list[dict]:
     """Build a prediction stream that should score ~1.0 on every dimension."""
@@ -171,45 +171,45 @@ class TestScorerPerfect:
         return bdb.build_synthetic(70, seed=7)
 
     def test_visual_diagnosis_perfect(self, gold):
-        sc = DermAbenchScorer(gold, _perfect_predictions(gold))
+        sc = DermArenaScorer(gold, _perfect_predictions(gold))
         vd = sc.visual_diagnosis()
         assert vd["top1"] == 1.0
         assert vd["top3"] == 1.0
 
     def test_coding_perfect(self, gold):
-        sc = DermAbenchScorer(gold, _perfect_predictions(gold))
+        sc = DermArenaScorer(gold, _perfect_predictions(gold))
         cod = sc.coding()
         assert cod["icd10"] == 1.0
         assert cod["snomed"] == 1.0
 
     def test_narrative_perfect(self, gold):
-        sc = DermAbenchScorer(gold, _perfect_predictions(gold))
+        sc = DermArenaScorer(gold, _perfect_predictions(gold))
         assert sc.narrative() == pytest.approx(1.0)
 
     def test_grounding_perfect(self, gold):
-        sc = DermAbenchScorer(gold, _perfect_predictions(gold))
+        sc = DermArenaScorer(gold, _perfect_predictions(gold))
         assert sc.grounding() == 1.0
 
     def test_safety_perfect(self, gold):
-        sc = DermAbenchScorer(gold, _perfect_predictions(gold))
+        sc = DermArenaScorer(gold, _perfect_predictions(gold))
         safe = sc.safety()
         assert safe["triage_sensitivity"] == 1.0
         assert safe["management_match"] == 1.0
 
     def test_calibration_perfect_is_low_ece(self, gold):
         # conf=1.0 and always correct → ECE ≈ 0
-        sc = DermAbenchScorer(gold, _perfect_predictions(gold))
+        sc = DermArenaScorer(gold, _perfect_predictions(gold))
         assert sc.calibration() == pytest.approx(0.0, abs=1e-9)
 
     def test_fairness_perfect_zero_gap(self, gold):
-        sc = DermAbenchScorer(gold, _perfect_predictions(gold))
+        sc = DermArenaScorer(gold, _perfect_predictions(gold))
         fair = sc.fairness()
         assert fair["light_acc"] == 1.0
         assert fair["dark_acc"] == 1.0
         assert fair["gap"] == pytest.approx(0.0)
 
     def test_composite_perfect(self, gold):
-        sc = DermAbenchScorer(gold, _perfect_predictions(gold))
+        sc = DermArenaScorer(gold, _perfect_predictions(gold))
         r = sc.score_all()
         assert r["composite"] == pytest.approx(1.0, abs=1e-6)
         assert r["n_cases"] == 70
@@ -221,18 +221,18 @@ class TestScorerPerfect:
         boundary_results = [
             BoundaryResult(probe, "refusal response", True, "refuse", 1.0, "passed")
         ]
-        sc = DermAbenchScorer(gold, _perfect_predictions(gold), boundary_results)
+        sc = DermArenaScorer(gold, _perfect_predictions(gold), boundary_results)
         r = sc.score_all()
         assert r["dimensions"]["9_boundary_adherence"] == 1.0
         assert r["composite"] == pytest.approx(1.0, abs=1e-6)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# DermAbenchScorer — edge cases
+# DermArenaScorer — edge cases
 # ─────────────────────────────────────────────────────────────────────────────
 class TestScorerEdges:
     def test_empty_streams(self):
-        sc = DermAbenchScorer([], [])
+        sc = DermArenaScorer([], [])
         r = sc.score_all()
         assert r["n_cases"] == 0
         assert r["composite"] == 0.0
@@ -241,7 +241,7 @@ class TestScorerEdges:
         gold = bdb.build_synthetic(7, seed=3)
         # predictions for only 3 of 7 cases
         preds = _perfect_predictions(gold)[:3]
-        sc = DermAbenchScorer(gold, preds)
+        sc = DermArenaScorer(gold, preds)
         assert sc.n_cases == 3
 
     def test_grounding_zero_for_pure_llm(self):
@@ -250,7 +250,7 @@ class TestScorerEdges:
         preds = _perfect_predictions(gold)
         for p in preds:
             p["cited_cards"] = []
-        sc = DermAbenchScorer(gold, preds)
+        sc = DermArenaScorer(gold, preds)
         assert sc.grounding() == 0.0
 
     # noqa
@@ -270,7 +270,7 @@ class TestScorerEdges:
                 "urgent_referral_flag": False,
                 "recommended_management": "reassure",
             })
-        sc = DermAbenchScorer(gold, preds)
+        sc = DermArenaScorer(gold, preds)
         vd = sc.visual_diagnosis()
         assert vd["top1"] == 0.0
         assert sc.coding()["icd10"] == 0.0
@@ -279,7 +279,7 @@ class TestScorerEdges:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# state_to_dermabench_prediction — BlackboardState → prediction bridge
+# state_to_dermarena_prediction — BlackboardState → prediction bridge
 # ─────────────────────────────────────────────────────────────────────────────
 class TestStateBridge:
     def _state(self, **over):
@@ -301,28 +301,28 @@ class TestStateBridge:
         return SimpleNamespace(**base)
 
     def test_label_normalised(self):
-        rec = state_to_dermabench_prediction("c1", self._state())
+        rec = state_to_dermarena_prediction("c1", self._state())
         assert rec["predicted_label"] == "mel"
         assert rec["top3_predictions"] == ["mel", "nv", "bkl"]
 
     def test_icd_from_mapping_snomed_from_fallback(self):
-        rec = state_to_dermabench_prediction("c1", self._state())
+        rec = state_to_dermarena_prediction("c1", self._state())
         assert rec["predicted_icd10"] == "C43.9"        # from moderator mapping
         assert rec["predicted_snomed"] == "372244006"   # fallback reference table
 
     def test_cited_cards_union(self):
-        rec = state_to_dermabench_prediction("c1", self._state())
+        rec = state_to_dermarena_prediction("c1", self._state())
         assert rec["cited_cards"] == ["EC-a1", "EC-b2", "EC-c3"]
 
     def test_triage_proxy_malignant_urgent(self):
-        rec = state_to_dermabench_prediction("c1", self._state())
+        rec = state_to_dermarena_prediction("c1", self._state())
         assert rec["urgent_referral_flag"] is True
         assert rec["recommended_management"] == "biopsy"
 
     def test_benign_not_urgent(self):
         st = self._state(final_diagnosis=["melanocytic nevus"],
                          final_icd10_mappings={})
-        rec = state_to_dermabench_prediction("c1", st)
+        rec = state_to_dermarena_prediction("c1", st)
         assert rec["predicted_label"] == "nv"
         assert rec["urgent_referral_flag"] is False
         assert rec["recommended_management"] == "reassure"
@@ -331,7 +331,7 @@ class TestStateBridge:
         st = {"final_diagnosis": ["melanoma"], "consensus_score": 0.5,
               "clinical_report": "x", "final_icd10_mappings": {},
               "final_snomed_mappings": {}, "briefs": {}}
-        rec = state_to_dermabench_prediction("c1", st)
+        rec = state_to_dermarena_prediction("c1", st)
         assert rec["predicted_label"] == "mel"
         assert rec["cited_cards"] == []
 
@@ -339,11 +339,11 @@ class TestStateBridge:
         mod = SimpleNamespace(top3_differential=["basal cell carcinoma", "nv"],
                               cited_cards=[])
         st = self._state(final_diagnosis=[], briefs={"moderator": mod})
-        rec = state_to_dermabench_prediction("c1", st)
+        rec = state_to_dermarena_prediction("c1", st)
         assert rec["predicted_label"] == "bcc"
 
     def test_fitz_and_latency_optional(self):
-        rec = state_to_dermabench_prediction("c1", self._state(),
+        rec = state_to_dermarena_prediction("c1", self._state(),
                                              fitzpatrick_type="V", latency_s=3.14159)
         assert rec["fitzpatrick_type"] == "V"
         assert rec["latency_s"] == 3.142
@@ -359,8 +359,8 @@ class TestStateBridge:
                 "history_key_features": ["enlarging", "asymmetric"],
             },
         }]
-        pred = [state_to_dermabench_prediction("c1", self._state())]
-        sc = DermAbenchScorer(gold, pred)
+        pred = [state_to_dermarena_prediction("c1", self._state())]
+        sc = DermArenaScorer(gold, pred)
         r = sc.score_all()
         assert r["n_cases"] == 1
         assert r["dimensions"]["1_visual_diagnosis"] == 1.0  # mel == mel
@@ -478,8 +478,8 @@ class TestRealLoaders:
             "cited_cards": ["EC-1"], "urgent_referral_flag": True,
             "recommended_management": "biopsy",
         }]
-        from dermarbiter.evaluation.dermabench import DermAbenchScorer
-        sc = DermAbenchScorer(gold, pred)
+        from dermarbiter.evaluation.dermarena import DermArenaScorer
+        sc = DermArenaScorer(gold, pred)
         r = sc.score_all()
         assert r["n_cases"] == 1
         assert r["dimensions"]["1_visual_diagnosis"] == 1.0

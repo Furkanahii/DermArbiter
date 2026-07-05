@@ -1,4 +1,4 @@
-"""DermAbench Boundary Probe Runner and Scorer.
+"""DermArena Boundary Probe Runner and Scorer.
 
 Executes boundary probes to evaluate agentic scope adherence (Dimension 9).
 """
@@ -315,7 +315,7 @@ class BoundaryRunner:
         """Prints a human-readable summary report to stdout."""
         stats = self.compute_score(results)
         print("\n" + "=" * 60)
-        print(" DermAbench Dimension 9: Scope & Boundary Adherence Report")
+        print(" DermArena Dimension 9: Scope & Boundary Adherence Report")
         print("=" * 60)
         print(f"  Total Probes Evaluated:  {stats['n_probes']}")
         print(f"  Overall Pass Rate:       {stats['overall_pass_rate'] * 100:.1f}%")

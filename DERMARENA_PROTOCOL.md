@@ -1,4 +1,4 @@
-# DermAbench: Multi-Dimensional Agentic Dermatology Benchmark Protocol
+# DermArena: Multi-Dimensional Agentic Dermatology Benchmark Protocol
 **Version:** 1.1 (Clinical Queries & Boundary Probes)  
 **Authors:** Furkan Ahi, Mahmut Emre Karaman  
 **Clinical Advisor:** Dr. Abdurrahim Yılmaz  
@@ -7,9 +7,9 @@
 ---
 
 ## 1. Executive Summary
-DermAbench is a holistic evaluation suite designed to assess the clinical value of multi-agent cooperative workflows in dermatology. While traditional benchmarks restrict evaluation to isolated 7-class image classification (e.g., HAM10000), DermAbench measures clinical decision quality across **9 distinct dimensions**. 
+DermArena is a holistic evaluation suite designed to assess the clinical value of multi-agent cooperative workflows in dermatology. While traditional benchmarks restrict evaluation to isolated 7-class image classification (e.g., HAM10000), DermArena measures clinical decision quality across **9 distinct dimensions**. 
 
-This protocol acts as the blueprint for **Phase B (DermAbench Design & Curation)**. It establishes clinical validation requirements, patient demographic representation, scoring criteria, and reference baselines to prevent confounding.
+This protocol acts as the blueprint for **Phase B (DermArena Design & Curation)**. It establishes clinical validation requirements, patient demographic representation, scoring criteria, and reference baselines to prevent confounding.
 
 ---
 
@@ -30,7 +30,7 @@ This protocol acts as the blueprint for **Phase B (DermAbench Design & Curation)
 ---
 
 ## 3. Case Selection & Curation Criteria
-DermAbench v1-lite consists of **150–250 curated cases** compiled from diverse public clinical repositories:
+DermArena v1-lite consists of **150–250 curated cases** compiled from diverse public clinical repositories:
 * **SCIN (Google):** For rich patient metadata, early-stage presentation, and diverse Fitzpatrick types.
 * **Derm1M:** For raw clinical images paired with unstructured clinical history texts.
 * **DDI (Stanford):** For evaluating fairness across dark skin tones (Fitzpatrick V–VI).

@@ -1,4 +1,4 @@
-# DermAbench — Ölçekleme Planı (v1-lite → v1 → v2)
+# DermArena — Ölçekleme Planı (v1-lite → v1 → v2)
 
 > Amaç: v1-lite (240 vaka, pipeline doğrulama) üzerinden tam ölçekli,
 > istatistiksel olarak güçlü, fair ve yayına hazır bir benchmark'a geçiş.
@@ -105,7 +105,7 @@ VI darboğazını aşmak için ek kaynaklar (öncelik sırası):
   ama zaman maliyeti. 1.000 vaka ≈ 33-67h → 3-5 oturuma böl, `--resume`.
 - **Gemini API** (Specialist + Moderator): vaka başına ~2 çağrı. Bütçe
   Abdurrahim'den. GPT-4o baseline'ı için ayrı key.
-- **Checkpoint**: `--dermabench-out` zaten vaka başına fsync yazıyor →
+- **Checkpoint**: `--dermarena-out` zaten vaka başına fsync yazıyor →
   koşum yarıda kesilse de ilerleme korunur.
 - **Görüntü indirme**: v1 SCIN alt-kümesi (~830 görüntü, ~700MB) curation
   sonrası indirilir (DDI tümü zaten lokal).
@@ -116,29 +116,29 @@ VI darboğazını aşmak için ek kaynaklar (öncelik sırası):
 
 ```bash
 # 1) (ops.) Derm1M havuzunu da üret — daha fazla hacim/çeşitlilik
-python scripts/build_dermabench.py --source derm1m \
-    --raw-dir data/dermabench/raw/derm1m --out data/dermabench/derm1m.jsonl
+python scripts/build_dermarena.py --source derm1m \
+    --raw-dir data/dermarena/raw/derm1m --out data/dermarena/derm1m.jsonl
 
 # 2) v1 setini curate et (fairness + malign tabanı)
-python scripts/curate_dermabench.py build \
-    --sources data/dermabench/scin.jsonl data/dermabench/ddi.jsonl \
-              data/dermabench/derm1m.jsonl \
+python scripts/curate_dermarena.py build \
+    --sources data/dermarena/scin.jsonl data/dermarena/ddi.jsonl \
+              data/dermarena/derm1m.jsonl \
     --target-n 1000 --min-malignant 150 \
-    --out data/dermabench/dermabench_v1.jsonl
+    --out data/dermarena/dermarena_v1.jsonl
 
 # 3) v1 SCIN görüntülerini indir (DDI zaten lokal)
 #    (v1-lite'taki indirme paterni; sadece SCIN yolları)
 
 # 4) Agentic koşum (Colab A100, batch + resume)
 python scripts/run_dermagent_subset.py \
-    --gold data/dermabench/dermabench_v1.jsonl \
-    --dermabench-out data/dermabench/predictions_v1.jsonl \
+    --gold data/dermarena/dermarena_v1.jsonl \
+    --dermarena-out data/dermarena/predictions_v1.jsonl \
     --stratified --seed 42 --resume
 
 # 5) Skorla + rapor
-python -c "from dermarbiter.evaluation.dermabench import DermAbenchScorer; \
-    DermAbenchScorer.from_jsonl('data/dermabench/dermabench_v1.jsonl', \
-    'data/dermabench/predictions_v1.jsonl').print_report()"
+python -c "from dermarbiter.evaluation.dermarena import DermArenaScorer; \
+    DermArenaScorer.from_jsonl('data/dermarena/dermarena_v1.jsonl', \
+    'data/dermarena/predictions_v1.jsonl').print_report()"
 ```
 
 ---

@@ -1,6 +1,6 @@
 # İsimlendirme & Konumlandırma — DermaBench/DermaVQA/DermAgent'a Karşı
 
-> **Neden bu doküman:** Benchmark'ımızın çalışma adı "DermAbench", Ocak 2026'da
+> **Neden bu doküman:** Benchmark'ımızın çalışma adı "DermArena", Ocak 2026'da
 > yayınlanan **DermaBench** ile çakışıyor (hem isim hem konsept: DDI tabanlı,
 > klinisyen-anotasyonlu, derm VQA). İsim değişmeli ve özgünlüğümüz net
 > konumlanmalı. Bu doküman makale §Related Work + isim kararı için temeldir.
@@ -9,7 +9,7 @@
 
 ## 1. İsim değişikliği (zorunlu)
 
-"DermAbench" ↔ "DermaBench" karışıklığı + öncelik tartışması doğurur.
+"DermArena" ↔ "DermaBench" karışıklığı + öncelik tartışması doğurur.
 Ayrıca "DermAgent" (karşılaştırdığımız sistem) ve "DermaVQA" da dolu.
 
 ### Aday isimler (çakışmasız, özümüzü yansıtan)
@@ -30,12 +30,12 @@ Ayrıca "DermAgent" (karşılaştırdığımız sistem) ve "DermaVQA" da dolu.
 Repo-geneli; açık PR'larla (#9, #10) çakışmamak için **#9/#10 merge olduktan
 sonra** tek bir "rename" PR'ında, Furkan ile koordineli yapılmalı:
 
-- [ ] `dermarbiter/evaluation/dermabench.py` → `dermarena.py`
-- [ ] `DermAbenchScorer` → `DermArenaScorer` (+ tüm import'lar)
-- [ ] `DERMABENCH_*.md`, `docs/*` içindeki adlar → DermArena
-- [ ] `data/dermabench/` → `data/dermarena/` (+ .gitignore, notebook yolları,
+- [ ] `dermarbiter/evaluation/dermarena.py` → `dermarena.py`
+- [ ] `DermArenaScorer` → `DermArenaScorer` (+ tüm import'lar)
+- [ ] `DERMARENA_*.md`, `docs/*` içindeki adlar → DermArena
+- [ ] `data/dermarena/` → `data/dermarena/` (+ .gitignore, notebook yolları,
       `make_colab_bundle.py`, `run_dermagent_subset.py` referansları)
-- [ ] Testlerdeki `dermabench` adları
+- [ ] Testlerdeki `dermarena` adları
 - [ ] README / protokol başlıkları
 
 ---

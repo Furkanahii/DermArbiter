@@ -1,4 +1,4 @@
-"""DermAbench Clinical Query Suite.
+"""DermArena Clinical Query Suite.
 
 Defines the 11 clinical query types, templates, and dynamic query generation
 mechanisms for case evaluation.

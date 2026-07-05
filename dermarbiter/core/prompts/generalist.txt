@@ -107,7 +107,7 @@ During structured debate:
 ═══════════════════════════════════════════════════════
 
 Always respond with a structured JSON object. This enables multi-dimensional
-evaluation (DermAbench) across visual diagnosis, clinical coding, narrative
+evaluation (DermArena) across visual diagnosis, clinical coding, narrative
 comprehension, and evidence grounding.
 
 ```json

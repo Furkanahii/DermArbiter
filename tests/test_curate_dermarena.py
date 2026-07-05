@@ -1,4 +1,4 @@
-"""Tests for the DermAbench v1-lite curation + clinician worksheet (B3).
+"""Tests for the DermArena v1-lite curation + clinician worksheet (B3).
 
 Offline; uses the synthetic builder to fabricate a skewed-Fitzpatrick
 source so the fairness-aware sampling is exercised.
@@ -15,12 +15,12 @@ import sys
 _SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(_SCRIPTS))
 
-import build_dermabench as bdb       # noqa: E402
-import curate_dermabench as cur      # noqa: E402
+import build_dermarena as bdb       # noqa: E402
+import curate_dermarena as cur      # noqa: E402
 
 
 def _skewed_source(n_per_fitz: dict[str, int]) -> list[dict]:
-    """Fabricate DermAbench cases with a given Fitzpatrick skew."""
+    """Fabricate DermArena cases with a given Fitzpatrick skew."""
     base = bdb.build_synthetic(sum(n_per_fitz.values()) + 7, seed=1)
     out = []
     idx = 0
@@ -110,7 +110,7 @@ class TestCurate:
     def test_scin_image_url_is_clickable(self):
         case = {
             "source": "scin",
-            "image_path": "data/dermabench/raw/scin/dataset/images/abc123.png",
+            "image_path": "data/dermarena/raw/scin/dataset/images/abc123.png",
         }
         url = cur._image_url(case)
         assert url == ("https://storage.googleapis.com/dx-scin-public-data/"
@@ -118,8 +118,8 @@ class TestCurate:
         assert url.startswith("https://")
 
     def test_non_scin_image_url_falls_back_to_path(self):
-        case = {"source": "ddi", "image_path": "data/dermabench/raw/ddi/x.png"}
-        assert cur._image_url(case) == "data/dermabench/raw/ddi/x.png"
+        case = {"source": "ddi", "image_path": "data/dermarena/raw/ddi/x.png"}
+        assert cur._image_url(case) == "data/dermarena/raw/ddi/x.png"
 
     def test_worksheet_uses_image_url_column(self, tmp_path):
         src = _skewed_source({"III": 5})
@@ -182,7 +182,7 @@ class TestApply:
 
     def test_frozen_set_is_scoreable(self, tmp_path):
         # A frozen curated case should drop straight into the scorer.
-        from dermarbiter.evaluation.dermabench import DermAbenchScorer
+        from dermarbiter.evaluation.dermarena import DermArenaScorer
         curated, sub, ws = self._curated_and_worksheet(tmp_path)
         rows = list(csv.DictReader(ws.open(encoding="utf-8-sig")))
         for r in rows:
@@ -201,6 +201,6 @@ class TestApply:
             "reasoning": "x", "cited_cards": ["EC-1"],
             "urgent_referral_flag": False, "recommended_management": "monitor",
         } for c in frozen]
-        sc = DermAbenchScorer(frozen, preds)
+        sc = DermArenaScorer(frozen, preds)
         r = sc.score_all()
         assert r["n_cases"] == len(frozen)

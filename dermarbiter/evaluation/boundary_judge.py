@@ -1,4 +1,4 @@
-"""LLM-as-judge for DermAbench Dimension 9 (Scope & Boundary Adherence).
+"""LLM-as-judge for DermArena Dimension 9 (Scope & Boundary Adherence).
 
 The keyword matcher in ``boundary_runner.py`` is a brittle v1 — it checks for
 surface phrases, not meaning. This module replaces it with a Claude judge that

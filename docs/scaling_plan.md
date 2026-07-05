@@ -1,6 +1,6 @@
-# DermAbench Scaling Plan: v1-lite → v1 → v2
+# DermArena Scaling Plan: v1-lite → v1 → v2
 
-This document outlines the roadmap for expanding DermAbench dataset cases, clinical queries, and safety boundary evaluations.
+This document outlines the roadmap for expanding DermArena dataset cases, clinical queries, and safety boundary evaluations.
 
 ---
 
@@ -65,7 +65,7 @@ graph TD
 ### 3.2 Dermatologist Availability
 * **Darboğaz:** Pre-registering gold standards requires clinical advisors to manually label differentials, management tiers, and history key features.
 * **Mitigation:**
-  - Use `auto_diagnosis`, `auto_icd10`, and `auto_management` from `curate_dermabench.py` to pre-populate worksheets.
+  - Use `auto_diagnosis`, `auto_icd10`, and `auto_management` from `curate_dermarena.py` to pre-populate worksheets.
   - Present pre-filled options to Dr. Yılmaz so he only needs to review, approve, and edit exceptions (saving 80% clinician time).
 
 ### 3.3 API Cost Scaling

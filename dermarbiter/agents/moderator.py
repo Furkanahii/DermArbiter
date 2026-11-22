@@ -88,6 +88,7 @@ class ModeratorAgent(BaseAgent):
     def generate_brief(
         self,
         evidence_cards: list[EvidenceCard],
+        case_context: str | None = None,
     ) -> AgentBrief:
         """
         Synthesize all available evidence into a meta-analytic brief.
@@ -111,6 +112,7 @@ class ModeratorAgent(BaseAgent):
             "diagnostic panel.  Your role is NOT to advocate for your own "
             "diagnosis but to synthesize all available evidence into a "
             "balanced meta-analysis.\n\n"
+            f"{self._build_case_block(case_context)}"
             f"{evidence_context}\n\n"
             "Respond with ONLY a JSON object in this exact schema:\n"
             "```json\n"
@@ -194,6 +196,7 @@ class ModeratorAgent(BaseAgent):
         self,
         topic: str,
         opponent_brief: AgentBrief,
+        case_context: str | None = None,
     ) -> str:
         """
         Generate a mediative, consensus-seeking response.
@@ -217,6 +220,7 @@ class ModeratorAgent(BaseAgent):
             "Your role is to mediate, NOT to attack.  Identify common "
             "ground, clarify misunderstandings, and guide the panel toward "
             "consensus.\n\n"
+            f"{self._build_case_block(case_context)}"
             f"DEBATE TOPIC: {topic}\n\n"
             f"AGENT ({opponent_brief.agent_role}) POSITION:\n"
             f"  Differential: {opponent_dx}\n"
@@ -455,7 +459,7 @@ class ModeratorAgent(BaseAgent):
             "clinical report:\n\n"
             f"=== CASE ===\n"
             f"Case ID: {blackboard.case_id}\n"
-            f"Query: {blackboard.query}\n\n"
+            f"{blackboard.get_case_presentation() or 'Query: ' + blackboard.query}\n\n"
             f"=== EVIDENCE ===\n{evidence_summary}\n\n"
             f"=== AGENT BRIEFS ===\n{brief_summary}\n\n"
             f"=== DEBATE HIGHLIGHTS ===\n{debate_excerpt}\n\n"

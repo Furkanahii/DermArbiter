@@ -1,0 +1,24 @@
+{
+  "track": "medxpertqa_derm",
+  "n_cases": 48,
+  "splits": {
+    "test": 48
+  },
+  "excluded": {},
+  "source": {
+    "revision": "7e7c465a68eb2b866926bfa59c8c9d17a8daba65",
+    "sha256": "07ea977f7e326909b51c883b65f6ad7f399fc6db07408ef3630f4e3048ec71b2"
+  },
+  "data_status": [
+    "pilot_candidate"
+  ],
+  "trivial_baselines": {
+    "constant_answer_chosen_on_dev": "B",
+    "test": {
+      "constant_top1": 0.2083,
+      "uniform_random_top1": 0.1
+    }
+  },
+  "output": "data/text_benchmark/medxpertqa_derm.jsonl",
+  "output_sha256": "59f3a7864bb55f22e4afc6881fd8226d043611f38f88ef93b7a9849af6ee8d00"
+}

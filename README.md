@@ -2,12 +2,46 @@
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg?style=flat&logo=python)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=flat)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg?style=flat&logo=github-actions)]()
 [![LangGraph](https://img.shields.io/badge/LangGraph-0.2%2B-purple.svg?style=flat)](https://github.com/langchain-ai/langgraph)
 
 > **Training-Free, Multi-Agent Collaborative Debate Framework for Equitable Dermatological Diagnosis**
 
-DermArbiter orchestrates four heterogeneous Large Language Models (LLMs) in a structured five-phase debate protocol to produce accurate, explainable, and fair dermatological diagnoses — **without requiring any additional model training or fine-tuning**. By combining frozen foundation-model tools with a novel debate architecture, DermArbiter achieves competitive diagnostic performance while providing built-in fairness guarantees across Fitzpatrick skin types I–VI. The framework is config-driven, fully reproducible, and easily extensible to new agents, tools, and benchmarks.
+DermArbiter is a research prototype that coordinates specialist, generalist,
+skeptic, and moderator roles through a five-phase workflow. It provides
+model/tool wrappers and evaluation utilities without additional model training.
+Clinical performance, calibration, and fairness require controlled validation;
+mock runs demonstrate software behavior only.
+
+## Research status — November 2026
+
+The first paper is a controlled **text-only comparison of agentic harnesses** on
+dermatology cases: ten arms (single call, self-refinement, voting, isolated
+refinement, debate, and DermArbiter's persona and moderator designs) on the same
+backbone, cases and seeds, with every call counted. Images are a later phase.
+
+Tracks: SCIN patient self-reports (rank ≤3 of 30 conditions), MedMCQA skin, and
+MedXpertQA dermatology. A local dev pilot (2 open-weight models × 2 tracks × 10 arms)
+is complete; main runs on free GPU notebooks wait for the data review and freeze.
+The benchmark code (`dermarbiter/research/`, `scripts/run_text_benchmark.py`) needs
+only the Python standard library.
+
+Current documents:
+
+- [Study report (Turkish)](docs/study_report_tr.md): questions, arms, statistics, pilot results
+- [Paper draft (English)](docs/paper/draft_en.md)
+- [2026 literature report (Turkish)](docs/literature_report_2026_tr.md)
+- [Runbook](docs/text_benchmark_runbook.md) and [free-GPU notebook](notebooks/08_text_benchmark_kaggle.ipynb)
+- [Data review and freeze (Turkish)](docs/data_review_tr.md)
+
+Earlier planning notes (superseded by the documents above, kept for history):
+[research decisions v2](docs/research_decisions_v2_tr.md),
+[text-only protocol draft](docs/text_only_protocol_2026_tr.md),
+[repository review](docs/research_readiness_2026_tr.md),
+[first](docs/literature_2026_tr.md) and [expanded](docs/literature_expanded_2026_tr.md)
+literature notes.
+
+The legacy `dermarbiter.experiments` runners are a mock scaffold with tools; they are
+not used by the text benchmark and reject non-mock requests.
 
 ---
 
@@ -64,10 +98,10 @@ graph TD
 
 ## 🌟 Key Features
 
-- 🧠 **Training-Free Multi-LLM Debate** — Achieves top-tier performance without expensive fine-tuning.
+- 🧠 **Training-Free Multi-LLM Debate** — Provides a configurable multi-role workflow for research.
 - 🛠️ **9 Specialized Frozen Tools** — Integrates state-of-the-art vision models, knowledge graphs, and RAG databases.
-- ⚖️ **Fairness-by-Design** — Integrates our novel **Fairness Probe** to check for Fitzpatrick skin type bias and ensure equitable outcomes.
-- 🔍 **Calibrated Uncertainty** — Leverages our **Uncertainty Probe** to flag clinically ambiguous cases for human intervention.
+- ⚖️ **Subgroup Analysis Utilities** — Includes skin-tone estimation and subgroup metrics; these do not guarantee equitable outcomes.
+- 🔍 **Uncertainty Utilities** — Includes confidence-related analysis; calibration must be validated against held-out outcomes.
 - ⚡ **Structured State Machine** — Powered by LangGraph for deterministic state transitions and robust error handling.
 - ⚙️ **Config-Driven Architecture** — Configure models, prompt strategies, and debate parameters entirely via YAML files.
 - 📊 **Reproducible Experimentation** — Built-in test harness, ablation runners, and statistical metrics calculators.
@@ -252,7 +286,8 @@ DermArbiter is fully parameterized via files inside the `configs/` directory.
 
 ## 📈 Supported Clinical Benchmarks
 
-DermArbiter is evaluated on several clinical dermatology datasets:
+Dataset integrations and evaluation targets include the following. This table
+does not establish that completed clinical evaluation results are available:
 
 | Dataset | Evaluation Focus | Case Count | Skin Tones Stratified | Source Citation |
 | :--- | :--- | :--- | :--- | :--- |

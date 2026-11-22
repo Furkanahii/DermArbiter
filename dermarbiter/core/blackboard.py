@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, ClassVar, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -220,6 +220,11 @@ class BlackboardState(BaseModel):
     )
 
     # --- Debate layer ---
+    initial_briefs: dict[str, AgentBrief] = Field(
+        default_factory=dict,
+        description="Pre-debate briefs, kept when agents revise their "
+                    "position after the debate (for transition analysis).",
+    )
     debate_log: list[DebateTurn] = Field(
         default_factory=list,
         description="Chronological log of debate turns.",
@@ -321,6 +326,66 @@ class BlackboardState(BaseModel):
                 f"Confidence: {brief.confidence:.2f} | "
                 f"Flags: {flags}"
             )
+        return "\n".join(lines)
+
+    # Top-level dataset fields that are legitimately visible to the model
+    # (what a clinician knows before diagnosing). They are folded into
+    # ``patient_context`` by ``from_case``.
+    VISIBLE_CASE_KEYS: ClassVar[tuple[str, ...]] = (
+        "clinical_history", "age", "sex", "body_site", "anatomic_site",
+        "duration", "symptoms",
+    )
+
+    @classmethod
+    def from_case(cls, case: dict[str, Any], *, text_only: bool = False) -> "BlackboardState":
+        """
+        Build the initial state from a dataset row.
+
+        Legacy runners only copied ``query`` and ``patient_context``, so a
+        DermArena row's top-level ``clinical_history`` never reached the
+        agents. This folds the visible top-level fields into
+        ``patient_context``; gold fields are filtered later by
+        ``get_case_presentation``. ``text_only=True`` drops the image.
+        """
+        context = dict(case.get("patient_context") or {})
+        for key in cls.VISIBLE_CASE_KEYS:
+            value = case.get(key)
+            if value not in (None, "", [], {}) and key not in context:
+                context[key] = value
+        return cls(
+            case_id=case.get("case_id", "UNKNOWN"),
+            query=case.get("query", "") or "",
+            image_path=None if text_only else case.get("image_path"),
+            patient_context=context,
+        )
+
+    # Keys that may carry the reference answer and must never reach a prompt.
+    GOLD_KEY_MARKERS: ClassVar[tuple[str, ...]] = (
+        "diagnos", "label", "gold", "ground_truth", "answer", "dx",
+        "pathology", "histopath", "biopsy_result",
+    )
+
+    def get_case_presentation(self) -> str:
+        """
+        Return the model-visible case text (query + patient context).
+
+        This is what a clinician would see *before* making a diagnosis: the
+        free-text query plus structured history/demographics. Keys that look
+        like reference answers (diagnosis, label, gold, ...) are dropped so
+        that gold information cannot leak into agent prompts.
+        """
+        lines: list[str] = []
+        if self.query and self.query.strip():
+            lines.append(f"Presentation: {self.query.strip()}")
+        for key, value in self.patient_context.items():
+            k = str(key).lower()
+            if any(marker in k for marker in self.GOLD_KEY_MARKERS):
+                continue
+            if value is None or (isinstance(value, (str, list, dict)) and not value):
+                continue
+            if isinstance(value, (list, tuple)):
+                value = ", ".join(str(v) for v in value)
+            lines.append(f"{str(key).replace('_', ' ').capitalize()}: {value}")
         return "\n".join(lines)
 
     def get_evidence_summary(self) -> str:

@@ -118,12 +118,7 @@ class ExperimentRunner:
         """Execute one case through the orchestrator and return result dict."""
         assert self._orchestrator is not None
 
-        initial_state = BlackboardState(
-            case_id=case.get("case_id", "UNKNOWN"),
-            query=case.get("query", ""),
-            image_path=case.get("image_path"),
-            patient_context=case.get("patient_context", {}),
-        )
+        initial_state = BlackboardState.from_case(case)
 
         t0 = time.monotonic()
         final_state = self._orchestrator.run(initial_state)
@@ -208,6 +203,7 @@ class ExperimentRunner:
                         "error": str(exc),
                     }
 
+                result.update(execution_mode="mock", publication_eligible=False)
                 fh.write(json.dumps(result, ensure_ascii=False) + "\n")
                 results.append(result)
 

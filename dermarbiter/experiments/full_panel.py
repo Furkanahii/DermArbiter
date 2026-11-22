@@ -73,8 +73,13 @@ class FullPanelRunner:
 
         Returns:
             A ``DermArbiterOrchestrator`` with all agents and all tools
-            registered (i.e., the default production configuration).
+            registered in the mock configuration.
         """
+        if not self.mock:
+            raise NotImplementedError(
+                "FullPanelRunner only implements mock execution. "
+                "Use --mock for smoke tests; no live benchmark was run."
+            )
         from dermarbiter.core.mock_factory import (
             create_mock_agents,
             create_mock_registry,
@@ -112,12 +117,7 @@ class FullPanelRunner:
         Returns:
             A result dict matching the standard experiment JSONL schema.
         """
-        initial_state = BlackboardState(
-            case_id=case.get("case_id", "UNKNOWN"),
-            query=case.get("query", ""),
-            image_path=case.get("image_path"),
-            patient_context=case.get("patient_context", {}),
-        )
+        initial_state = BlackboardState.from_case(case)
 
         t0 = time.monotonic()
         try:
@@ -171,6 +171,10 @@ class FullPanelRunner:
         Returns:
             List of per-case result dicts.
         """
+        if not self.mock:
+            raise NotImplementedError(
+                "FullPanelRunner only implements mock execution. Use --mock for smoke tests."
+            )
         cases = _load_cases(self.data_path, max_cases=self.max_cases)
         if not cases:
             logger.warning("No cases loaded from %s", self.data_path)
@@ -199,6 +203,7 @@ class FullPanelRunner:
                     case_id,
                 )
                 result = self._run_single_case(orchestrator, case)
+                result.update(execution_mode="mock", publication_eligible=False)
                 fh.write(json.dumps(result, ensure_ascii=False) + "\n")
                 results.append(result)
 

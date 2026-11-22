@@ -120,7 +120,9 @@ def independent_read(
     
     for role, agent in agents.items():
         logger.info("Agent [%s] is reviewing evidence and generating brief...", role)
-        brief = agent.generate_brief(state.evidence_cards)
+        brief = agent.generate_brief(
+            state.evidence_cards, case_context=state.get_case_presentation()
+        )
         state.add_brief(brief)
         
         # Estimate token usage (prompt context + response brief)
@@ -180,13 +182,17 @@ def targeted_debate(
     max_tokens_per_turn: int = 100,
     global_token_budget: int = 50000,
     turn_order: List[str] | None = None,
+    revise_after_debate: bool = True,
 ) -> None:
     """
     Phase 4: Targeted Debate
     
     Orchestrates sequential rounds of debate between agents. If state.early_exit is 
     True, this phase is skipped. Truncates turn arguments exceeding turn token budget,
-    and terminates early if the global token budget is exhausted.
+    and terminates early if the global token budget is exhausted. When
+    ``revise_after_debate`` is True, every debating agent then revises its
+    brief (see ``revise_briefs_after_debate``) so Phase 5 ranks post-debate
+    positions instead of the pre-debate ones.
     """
     if state.early_exit:
         logger.info("Phase 4: Targeted Debate skipped due to early exit.")
@@ -196,7 +202,57 @@ def targeted_debate(
         turn_order = ["specialist", "generalist", "skeptic"]
         
     logger.info("Starting Phase 4: Targeted Debate (Max Rounds: %d)", max_rounds)
-    
+
+    _run_debate_rounds(
+        state, agents, max_rounds, max_tokens_per_turn, global_token_budget, turn_order
+    )
+    if revise_after_debate:
+        revise_briefs_after_debate(state, agents)
+
+
+def revise_briefs_after_debate(
+    state: BlackboardState,
+    agents: Dict[str, BaseAgent],
+) -> None:
+    """
+    Let each debating agent revise its brief after reading the debate.
+
+    Without this step the debate only produces text: Phase 5 would rank
+    diagnoses from the *pre-debate* briefs, so the debate could never change
+    the scored answer. The pre-debate briefs are preserved in
+    ``state.initial_briefs`` for initial→final transition analysis.
+    Agents that do not implement ``revise_brief`` keep their brief.
+    """
+    if not state.debate_log:
+        return
+    transcript = "\n".join(
+        f"Round {t.round_num} [{t.speaker}]: {t.argument}" for t in state.debate_log
+    )
+    case_text = state.get_case_presentation()
+    for role, brief in list(state.briefs.items()):
+        if role == "moderator":
+            continue
+        agent = agents.get(role)
+        if agent is None or not hasattr(agent, "revise_brief"):
+            continue
+        state.initial_briefs.setdefault(role, brief)
+        revised = agent.revise_brief(brief, transcript, case_context=case_text)
+        state.briefs[role] = revised
+        state.total_tokens += BaseAgent._count_tokens(transcript) + BaseAgent._count_tokens(
+            revised.reasoning
+        ) + 300
+    logger.info("Post-debate revision complete for roles: %s", list(state.initial_briefs))
+
+
+def _run_debate_rounds(
+    state: BlackboardState,
+    agents: Dict[str, BaseAgent],
+    max_rounds: int,
+    max_tokens_per_turn: int,
+    global_token_budget: int,
+    turn_order: List[str],
+) -> None:
+    """Sequential argument rounds (the body of Phase 4)."""
     for round_num in range(1, max_rounds + 1):
         logger.info("Debate Round %d / %d", round_num, max_rounds)
         
@@ -240,7 +296,9 @@ def targeted_debate(
                 topic = "Clinical review of the patient case and available tool evidence."
                 
             logger.info("Agent [%s] is debating on topic: %s", speaker, topic)
-            argument = agent.generate_argument(topic, opponent_brief)
+            argument = agent.generate_argument(
+                topic, opponent_brief, case_context=state.get_case_presentation()
+            )
             
             # Enforce turn token limit (truncate text if it exceeds limit)
             raw_tokens = BaseAgent._count_tokens(argument)

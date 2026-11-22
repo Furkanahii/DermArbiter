@@ -49,6 +49,7 @@ class DermArbiterOrchestrator:
         specialist_weight: float = 1.2,
         rank_weights: List[float] | None = None,
         top_k_diagnoses: int = 5,
+        revise_after_debate: bool = True,
     ) -> None:
         """
         Initializes the orchestrator with required agents, tools, and execution limits.
@@ -63,6 +64,8 @@ class DermArbiterOrchestrator:
             specialist_weight: Weight multiplier for specialist in synthesis.
             rank_weights: Positional weights for rank 1, 2, 3 in synthesis.
             top_k_diagnoses: Max diagnoses in final ranking.
+            revise_after_debate: Let agents revise their briefs after Phase 4
+                so the debate can change the scored diagnosis.
         """
         self.agents = agents
         self.tool_registry = tool_registry
@@ -73,6 +76,7 @@ class DermArbiterOrchestrator:
         self.specialist_weight = specialist_weight
         self.rank_weights = rank_weights
         self.top_k_diagnoses = top_k_diagnoses
+        self.revise_after_debate = revise_after_debate
 
         # Compile the graph
         self.graph = self._build_graph()
@@ -147,6 +151,7 @@ class DermArbiterOrchestrator:
             max_tokens_per_turn=self.max_tokens_per_turn,
             global_token_budget=self.global_token_budget,
             turn_order=self.turn_order,
+            revise_after_debate=self.revise_after_debate,
         )
         return state_obj
 

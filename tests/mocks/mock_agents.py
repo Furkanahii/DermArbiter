@@ -54,6 +54,7 @@ class MockBaseAgent(ABC):
     def generate_brief(
         self,
         evidence_cards: list[EvidenceCard] | None = None,
+        case_context: str | None = None,
     ) -> AgentBrief:
         """Phase 2 — produce an independent diagnostic brief."""
         ...
@@ -63,6 +64,7 @@ class MockBaseAgent(ABC):
         self,
         topic: str = "",
         opponent_brief: AgentBrief | None = None,
+        case_context: str | None = None,
     ) -> str:
         """Phase 4 — produce a debate argument or rebuttal."""
         ...
@@ -98,6 +100,7 @@ class MockSpecialist(MockBaseAgent):
     def generate_brief(
         self,
         evidence_cards: list[EvidenceCard] | None = None,
+        case_context: str | None = None,
     ) -> AgentBrief:
         cited = [c.card_id for c in (evidence_cards or [])[:3]]
         return AgentBrief(
@@ -125,6 +128,7 @@ class MockSpecialist(MockBaseAgent):
         self,
         topic: str = "",
         opponent_brief: AgentBrief | None = None,
+        case_context: str | None = None,
     ) -> str:
         return (
             "The convergence of PanDerm classification (62% melanoma), "
@@ -160,6 +164,7 @@ class MockGeneralist(MockBaseAgent):
     def generate_brief(
         self,
         evidence_cards: list[EvidenceCard] | None = None,
+        case_context: str | None = None,
     ) -> AgentBrief:
         cited = [c.card_id for c in (evidence_cards or [])[:2]]
         return AgentBrief(
@@ -187,6 +192,7 @@ class MockGeneralist(MockBaseAgent):
         self,
         topic: str = "",
         opponent_brief: AgentBrief | None = None,
+        case_context: str | None = None,
     ) -> str:
         return (
             "While melanoma is the leading candidate, the possibility "
@@ -217,6 +223,7 @@ class MockSkeptic(MockBaseAgent):
     def generate_brief(
         self,
         evidence_cards: list[EvidenceCard] | None = None,
+        case_context: str | None = None,
     ) -> AgentBrief:
         return AgentBrief(
             agent_role=self.role,
@@ -248,6 +255,7 @@ class MockSkeptic(MockBaseAgent):
         self,
         topic: str = "",
         opponent_brief: AgentBrief | None = None,
+        case_context: str | None = None,
     ) -> str:
         return (
             "A 62% classifier probability does not constitute "
@@ -282,6 +290,7 @@ class MockModerator(MockBaseAgent):
     def generate_brief(
         self,
         evidence_cards: list[EvidenceCard] | None = None,
+        case_context: str | None = None,
     ) -> AgentBrief:
         return AgentBrief(
             agent_role=self.role,
@@ -311,6 +320,7 @@ class MockModerator(MockBaseAgent):
         self,
         topic: str = "",
         opponent_brief: AgentBrief | None = None,
+        case_context: str | None = None,
     ) -> str:
         return (
             "The panel has reached majority consensus on melanoma as "

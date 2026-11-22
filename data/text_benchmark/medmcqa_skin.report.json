@@ -1,0 +1,35 @@
+{
+  "track": "medmcqa_skin",
+  "n_cases": 1269,
+  "splits": {
+    "test": 1012,
+    "dev": 257
+  },
+  "excluded": {
+    "multi_answer": 491,
+    "empty_or_duplicate_options": 7,
+    "image_dependent": 4,
+    "exact_duplicates_merged": 0
+  },
+  "source": {
+    "revision": "91c6572c454088bf71b679ad90aa8dffcd0d5868",
+    "sha256": "b119434ba551517a6ec0ba1f7e0b4c029165ed284a4704f262ce37c791c493c5"
+  },
+  "data_status": [
+    "pilot_candidate"
+  ],
+  "trivial_baselines": {
+    "constant_answer_chosen_on_dev": "A",
+    "dev": {
+      "constant_top1": 0.2568,
+      "uniform_random_top1": 0.25
+    },
+    "test": {
+      "constant_top1": 0.2708,
+      "uniform_random_top1": 0.25
+    }
+  },
+  "options_shuffled": true,
+  "output": "data/text_benchmark/medmcqa_skin.jsonl",
+  "output_sha256": "a4750e770066abf7291b4fdfd243576da31be1928d9e12f1b3abd6868a876c09"
+}

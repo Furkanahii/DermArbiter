@@ -79,6 +79,7 @@ class GeneralistAgent(BaseAgent):
     def generate_brief(
         self,
         evidence_cards: list[EvidenceCard],
+        case_context: str | None = None,
     ) -> AgentBrief:
         """
         Synthesize evidence cards into a generalist diagnostic brief.
@@ -103,6 +104,7 @@ class GeneralistAgent(BaseAgent):
             "Review the following evidence cards and produce a diagnostic "
             "opinion that balances specialist tool output with clinical "
             "prevalence and patient context.\n\n"
+            f"{self._build_case_block(case_context)}"
             f"{evidence_context}\n\n"
             "Respond with ONLY a JSON object in this exact schema:\n"
             "```json\n"
@@ -178,6 +180,7 @@ class GeneralistAgent(BaseAgent):
         self,
         topic: str,
         opponent_brief: AgentBrief,
+        case_context: str | None = None,
     ) -> str:
         """
         Generate a pragmatic, prevalence-aware rebuttal.
@@ -209,6 +212,7 @@ class GeneralistAgent(BaseAgent):
             "You are the GENERALIST primary-care physician in a structured "
             "diagnostic debate.  Provide a pragmatic, patient-centred "
             "rebuttal.\n\n"
+            f"{self._build_case_block(case_context)}"
             f"DEBATE TOPIC: {topic}\n\n"
             f"OPPONENT ({opponent_brief.agent_role}) POSITION:\n"
             f"  Differential: {opponent_dx}\n"

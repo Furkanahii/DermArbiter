@@ -1,8 +1,8 @@
-"""DermArbiter Baseline Runner — Single-LLM evaluation without debate.
+"""DermArbiter legacy baseline runner — two-role mock scaffold.
 
-Runs a single LLM agent (the Specialist) on each case, bypassing the
-multi-agent debate protocol.  This provides the lower-bound baseline for
-comparison against the full DermArbiter panel.
+Runs specialist and moderator roles with mock tools through the orchestrator.
+This is not a true single-call, tool-free baseline. Its output is not clinical
+benchmark evidence. The class name is retained for compatibility.
 
 Usage::
 
@@ -40,10 +40,10 @@ _BASELINE_ROLES = {"specialist", "moderator"}
 # ---------------------------------------------------------------------------
 
 class BaselineRunner:
-    """Run a single-LLM baseline evaluation (no debate).
+    """Run the legacy specialist/moderator mock scaffold.
 
     Keeps only the *specialist* and *moderator* agents so the orchestrator
-    can still coordinate a single-round pass without any multi-agent debate.
+    can still coordinate a pass with at most one configured debate round.
     All other agents (generalist, skeptic, etc.) are removed.
 
     Args:
@@ -75,8 +75,13 @@ class BaselineRunner:
 
         Returns:
             A ``DermArbiterOrchestrator`` limited to the specialist and
-            moderator roles, with ``max_rounds=1`` to prevent debate.
+            moderator roles, with ``max_rounds=1``.
         """
+        if not self.mock:
+            raise NotImplementedError(
+                "BaselineRunner only implements a legacy mock scaffold. "
+                "Use --mock for smoke tests; a real single-call baseline is not implemented."
+            )
         from dermarbiter.core.mock_factory import (
             create_mock_agents,
             create_mock_registry,
@@ -120,12 +125,7 @@ class BaselineRunner:
         Returns:
             A result dict matching the standard experiment JSONL schema.
         """
-        initial_state = BlackboardState(
-            case_id=case.get("case_id", "UNKNOWN"),
-            query=case.get("query", ""),
-            image_path=case.get("image_path"),
-            patient_context=case.get("patient_context", {}),
-        )
+        initial_state = BlackboardState.from_case(case)
 
         t0 = time.monotonic()
         try:
@@ -179,6 +179,10 @@ class BaselineRunner:
         Returns:
             List of per-case result dicts.
         """
+        if not self.mock:
+            raise NotImplementedError(
+                "BaselineRunner only implements a legacy mock scaffold. Use --mock for smoke tests."
+            )
         cases = _load_cases(self.data_path, max_cases=self.max_cases)
         if not cases:
             logger.warning("No cases loaded from %s", self.data_path)
@@ -207,6 +211,7 @@ class BaselineRunner:
                     case_id,
                 )
                 result = self._run_single_case(orchestrator, case)
+                result.update(execution_mode="mock", publication_eligible=False)
                 fh.write(json.dumps(result, ensure_ascii=False) + "\n")
                 results.append(result)
 

@@ -235,6 +235,7 @@ def _run_one_real(
         "image_path": case["image_path"],
         "query": case["query"],
         "patient_context": case.get("patient_context", {}),
+        **{k: case[k] for k in ("clinical_history", "age", "sex", "body_site") if k in case},
     })
     latency_s = time.perf_counter() - t0
 
@@ -301,12 +302,7 @@ class _OrchestratorAdapter:
 
     def invoke(self, case_dict: dict[str, Any]) -> Any:
         from dermarbiter.core.blackboard import BlackboardState
-        state = BlackboardState(
-            case_id=case_dict["case_id"],
-            image_path=case_dict.get("image_path"),
-            query=case_dict.get("query", ""),
-            patient_context=case_dict.get("patient_context", {}),
-        )
+        state = BlackboardState.from_case(case_dict)
         return self._orch.run(state)
 
 

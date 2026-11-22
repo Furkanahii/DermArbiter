@@ -92,6 +92,33 @@ python scripts/run_text_benchmark.py score data/text_benchmark/scin_text_k30.jso
     --predictions runs/scin_dev/qwen3-8b/dermarbiter_r0/predictions.jsonl
 ```
 
+## Pilot (all arms, one command)
+
+```bash
+export GEMINI_API_KEY=...   # your own terminal only; never commit or paste it
+# 1. One call: see which version string the provider returns
+python scripts/run_text_benchmark.py probe data/text_benchmark/scin_text_k30.jsonl --split dev --model gemini-2.5-flash
+# 2. Plan, then run all 10 arms on 20 dev cases (840 calls per track)
+python scripts/run_pilot.py data/text_benchmark/scin_text_k30.jsonl --split dev --limit 20 --dev-pilot \
+    --model gemini-2.5-flash --expected-model-version <returned_model_version> \
+    --out runs/pilot/scin_dev20 --plan-only
+python scripts/run_pilot.py data/text_benchmark/scin_text_k30.jsonl --split dev --limit 20 --dev-pilot \
+    --model gemini-2.5-flash --expected-model-version <returned_model_version> \
+    --out runs/pilot/scin_dev20
+```
+
+`--limit N` picks a fixed, hash-ordered subset (same N ⇒ same cases).
+`--dev-pilot` allows unreviewed data on dev only; such runs are marked
+`publication_eligible=false`. The pilot writes `summary.md` / `summary.json`
+with accuracy, coverage, calls, tokens and latency per arm, and the difference
+to `direct` with a case-level paired bootstrap 95% CI and exact McNemar p.
+Re-running the same command skips completed arms.
+
+What to read in the pilot: parse/format error rate per arm, abstention from
+vote ties (role arms with three disagreeing agents abstain), tokens per case
+(to price the full run), and whether any arm is clearly broken. Do not tune
+prompts on test, and do not draw conclusions from 20 cases.
+
 Offline check (22 Nov): a local stub server answering "Eczema" to every case
 scored exactly the dev constant baseline (25.9%) through `direct` and
 `dermarbiter`, confirming builder → runner → provider → scorer wiring. No live

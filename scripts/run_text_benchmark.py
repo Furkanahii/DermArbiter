@@ -12,8 +12,8 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from dermarbiter.research.text_benchmark import (  # noqa: E402
-    Config, GeminiProvider, METHOD_CALLS, OpenAICompatibleProvider, digest, evaluate,
-    run_case, strict_json, task_of, validate_cases,
+    TASK_SYSTEM, Config, GeminiProvider, METHOD_CALLS, OpenAICompatibleProvider, digest,
+    evaluate, run_case, strict_json, task_of, validate_cases, visible_case,
 )
 
 
@@ -21,9 +21,19 @@ def read_jsonl(path):
     return [strict_json(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
-def main():
+def _provider(args, p):
+    if args.provider == "gemini":
+        return GeminiProvider(os.environ.get(args.api_key_env or "GEMINI_API_KEY", ""))
+    if not args.base_url:
+        p.error("openai_compatible requires --base-url")
+    return OpenAICompatibleProvider(
+        args.base_url, os.environ.get(args.api_key_env or "OPENAI_API_KEY", ""),
+        json_mode=not args.no_json_mode, token_param=args.token_param)
+
+
+def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("action", choices=("plan", "run", "score"))
+    p.add_argument("action", choices=("plan", "probe", "run", "score"))
     p.add_argument("dataset", type=Path)
     p.add_argument("--split", choices=("dev", "test"), required=True)
     p.add_argument("--model")
@@ -43,12 +53,22 @@ def main():
                    "(default GEMINI_API_KEY / OPENAI_API_KEY). Keys are never passed as arguments.")
     p.add_argument("--token-param", choices=("max_tokens", "max_completion_tokens"),
                    default="max_tokens")
+    p.add_argument("--limit", type=int,
+                   help="Use only the first N cases of the split in a fixed hash order "
+                        "(pilots). The same N always selects the same cases.")
+    p.add_argument("--dev-pilot", action="store_true",
+                   help="Allow pilot_candidate data on the dev split only. Runs are "
+                        "marked publication_eligible=false.")
     p.add_argument("--no-json-mode", action="store_true",
                    help="openai_compatible: do not send response_format=json_object")
-    args = p.parse_args()
+    args = p.parse_args(argv)
     cases = read_jsonl(args.dataset)
     validate_cases(cases)  # cross-split checks precede selection
     selected = [c for c in cases if c["split"] == args.split]
+    if args.limit is not None:
+        if args.limit < 1:
+            p.error("--limit must be positive")
+        selected = sorted(selected, key=lambda c: digest(["pilot-order", c["case_id"]]))[:args.limit]
     if not selected:
         p.error("Selected split is empty")
     if args.action == "score":
@@ -71,24 +91,33 @@ def main():
     if args.action == "plan":
         print(json.dumps(plan, indent=2))
         return
+    if args.action == "probe":
+        # One live call on the first selected case; prints the returned model version
+        # to pin with --expected-model-version. Writes nothing.
+        if not args.model:
+            p.error("probe requires --model")
+        provider = _provider(args, p)
+        system = TASK_SYSTEM[task_of(selected[0])]
+        prompt = "Rank the most likely conditions." if task_of(selected[0]) == "dx" else "Select the best answer."
+        prompt += "\nCASE:\n" + json.dumps(visible_case(selected[0]), ensure_ascii=False)
+        probe_cfg = Config(args.model, "probe", "direct", args.temperature, args.max_output_tokens)
+        c = provider.complete(system, prompt, probe_cfg, 0)
+        print(json.dumps({"returned_model_version": c.model_version, "finish_reason": c.finish_reason,
+                          "usage": c.usage, "text_preview": c.text[:300]}, indent=2))
+        return
     if not args.output_dir or not args.model or not args.expected_model_version:
         p.error("run requires --output-dir, --model and --expected-model-version")
     if args.max_calls is None or calls > args.max_calls:
         p.error(f"run requires an explicit --max-calls >= {calls}")
     if any(c["text_origin"] == "fixture" or c["gold_origin"] == "fixture" for c in selected):
         p.error("Fixtures are for local tests, not live research runs")
-    if any(c["data_status"] != "frozen" for c in selected):
-        p.error("Data acceptance review is pending: live runs require data_status=frozen")
+    unfrozen = any(c["data_status"] != "frozen" for c in selected)
+    if unfrozen and not (args.dev_pilot and args.split == "dev"):
+        p.error("Data acceptance review is pending: live runs require data_status=frozen "
+                "(or --dev-pilot on the dev split)")
     config = Config(args.model, args.expected_model_version, args.method,
                     args.temperature, args.max_output_tokens, args.seed, args.repeat)
-    if args.provider == "gemini":
-        provider = GeminiProvider(os.environ.get(args.api_key_env or "GEMINI_API_KEY", ""))
-    else:
-        if not args.base_url:
-            p.error("openai_compatible requires --base-url")
-        provider = OpenAICompatibleProvider(
-            args.base_url, os.environ.get(args.api_key_env or "OPENAI_API_KEY", ""),
-            json_mode=not args.no_json_mode, token_param=args.token_param)
+    provider = _provider(args, p)
     args.output_dir.mkdir(parents=True, exist_ok=False)
     module_path = Path(__file__).resolve().parents[1] / "dermarbiter/research/text_benchmark.py"
     manifest = {**plan, "config": asdict(config), "config_sha256": digest(asdict(config)),
@@ -97,7 +126,9 @@ def main():
                 "runner_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
                 "status": "started", "provider": provider.name,
                 "base_url": getattr(provider, "base_url", None), "retries": 0,
-                "publication_review_required": True}
+                "publication_review_required": True,
+                "limit": args.limit, "dev_pilot": bool(unfrozen),
+                "publication_eligible": not unfrozen}
     manifest_path = args.output_dir / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     records = []
@@ -105,6 +136,7 @@ def main():
         for case in selected:
             record = run_case(case, config, provider)
             record["dataset_sha256"] = plan["dataset_sha256"]
+            record["publication_eligible"] = not unfrozen
             out.write(json.dumps(record, ensure_ascii=False, allow_nan=False) + "\n")
             out.flush()
             records.append(record)

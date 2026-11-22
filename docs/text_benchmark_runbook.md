@@ -155,6 +155,41 @@ python scripts/analyze_runs.py data/text_benchmark/scin_text_k30.jsonl --split d
 
 About 20 s per call for a 4B model on this machine; one track is 420 calls.
 
+## Main runs on a free GPU (Kaggle / Colab, no API cost)
+
+A laptop is too slow for the test split (SCIN test ≈ 73k calls per model at 42
+calls/case). Serve an open-weight model with vLLM on a free GPU (Kaggle gives
+about 30 GPU hours a week, 2×T4; Colab free gives one T4 per session) and send
+cases concurrently with `--workers`, which vLLM batches. Output does not depend
+on `--workers` (same order, same per-call seeds).
+
+```bash
+# notebook cell 1: code + data (data files are not in git; rebuild from pinned sources)
+git clone -b research/text-only-harness https://github.com/Furkanahii/DermArbiter && cd DermArbiter
+pip install -q vllm pandas pyarrow
+# ... run the three build commands above; compare output_sha256 with the tracked reports
+
+# cell 2: serve (T4 has no bf16 → fp16; AWQ fits a 7B model on one T4)
+nohup vllm serve Qwen/Qwen2.5-7B-Instruct-AWQ --dtype half --max-model-len 8192 \
+    --served-model-name qwen2.5-7b-awq > vllm.log 2>&1 &
+until curl -s localhost:8000/v1/models >/dev/null; do sleep 5; done
+
+# cell 3: check the schema is honoured, then run
+python scripts/run_text_benchmark.py probe data/text_benchmark/scin_text_k30.jsonl --split dev \
+    --provider openai_compatible --base-url http://localhost:8000/v1 --model qwen2.5-7b-awq
+python scripts/run_pilot.py data/text_benchmark/scin_text_k30.jsonl --split dev --limit 20 --dev-pilot \
+    --provider openai_compatible --base-url http://localhost:8000/v1 \
+    --model qwen2.5-7b-awq --expected-model-version qwen2.5-7b-awq \
+    --workers 32 --timeout 600 --out runs/kaggle/scin_text_k30
+```
+
+Copy `runs/` out of the notebook before the session ends (Kaggle: save as
+output; Colab: Drive). Interrupted pilots resume by re-running the same command;
+remove the unfinished arm folder first. Test-split runs additionally need frozen
+data (see Build). Choose the second backbone on dev only; check with `probe`
+that the server enforces the JSON schema (enum, required confidence,
+rationale `maxLength`) before a long run.
+
 ---
 
 # Appendix: original MCQ pilot notes (21 Nov)

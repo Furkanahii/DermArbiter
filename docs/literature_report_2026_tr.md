@@ -110,7 +110,7 @@ Not: Bu bölümdeki her kayıt ajan sistemi değildir. Ajanlar (D1–D4), benchm
 
 * *Towards Trustworthy Dermatology MLLMs* ([2511.09195](https://arxiv.org/abs/2511.09195)): ilk gönderim Kasım 2025. ECCV 2026 sürümü eşleşirse eklenebilir.
 * DeepRare'in 2025 preprint'i ([2506.20430](https://arxiv.org/abs/2506.20430)): yalnız 2026 *Nature* sürümü sayıldı (M4).
-* **MMedAgentBench** (EMNLP 2026, [ACL](https://aclanthology.org/2026.emnlp-main.469/)): 22 Kasım aramasında görüldü, içeriği okunmadı. Okunacak.
+* **MMedAgentBench** (Sun ve ark., EMNLP 2026, s. 10780–10793 [O] [ACL](https://aclanthology.org/2026.emnlp-main.469/)): çok aşamalı klinik karar verme. Ajan, yeni tetkik sonuçları geldikçe kararını güncelliyor. Üçüncü basamak hastanelerden 150'den fazla anonim vaka, 500'den fazla klinik aşama, uzman hekim anotasyonu var. Tanı doğruluğu ile kaynak/maliyet verimliliğini birlikte ölçüyor. Özette dermatoloji, multimodal içerik ve karşılaştırılan ajan sayısı geçmiyor. Bizimle ilişkisi: tek aşamalı metin girdisinde harness karşılaştırıyoruz; onların ölçtüğü "tetkik planlama + maliyet" ekseni bizde yok. Tartışma bölümünde gelecek iş olarak anılabilir, doğrudan rakip değil.
 * **SkinAgent AI** ([2609.29341](https://arxiv.org/abs/2609.29341)): tanı amaçlı olmayan cilt bakımı ajanı; kapsam dışı, gerekirse bir cümleyle anılır.
 * 22 Kasım kontrolü: M4 PubMed'den (PMID 41708847), M12 ve D10 ACL Anthology'den doğrulandı. D8 (DermEVAL) için CVF sayfası otomatik erişimi reddetti (HTTP 403); 16 hastalık ve 11.347 görüntü sayıları tarayıcıdan elle kontrol edilmeli.
 

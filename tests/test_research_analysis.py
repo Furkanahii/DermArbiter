@@ -120,3 +120,19 @@ def test_variance_decomposition_shares_sum_and_detect_harness_effect():
     assert out["share"]["model"] == pytest.approx(0.0)
     with pytest.raises(ValueError, match="Unbalanced"):
         variance_decomposition(cases, runs[:3])
+
+
+def test_holm_and_prespecified_pairs():
+    from dermarbiter.research.analysis import holm, prespecified_comparisons
+    assert holm([0.01, 0.04, 0.03]) == pytest.approx([0.03, 0.06, 0.06])
+    assert holm([0.5]) == [0.5]
+    cases = [dx_case(f"c{i}") for i in range(8)]
+    runs = [_run(cases, "isolated_refine", lambda c: "Eczema"),
+            _run(cases, "debate", lambda c: "Psoriasis"),
+            _run(cases, "vote6", lambda c: "Psoriasis")]
+    rows = prespecified_comparisons(cases, runs, n_boot=200)
+    assert [(r["base"], r["arm"]) for r in rows] == [("isolated_refine", "debate"), ("vote6", "debate")]
+    first = rows[0]
+    assert first["delta"] == pytest.approx(1.0) and first["only_arm"] == 8
+    assert first["p_holm"] == pytest.approx(min(1.0, 2 * first["p_value"]))
+    assert rows[1]["delta"] == 0 and rows[1]["p_holm"] == 1.0

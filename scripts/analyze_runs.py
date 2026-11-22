@@ -15,7 +15,8 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from dermarbiter.research.analysis import (  # noqa: E402
-    load_run, read_jsonl, summarize, to_markdown, variance_decomposition,
+    load_run, prespecified_comparisons, prespecified_markdown, read_jsonl, summarize,
+    to_markdown, variance_decomposition,
 )
 from dermarbiter.research.text_benchmark import digest, validate_cases  # noqa: E402
 
@@ -39,6 +40,11 @@ def main(argv=None):
     rows = summarize(sel, runs, reference=a.reference)
     text = [to_markdown(rows, reference=a.reference)]
     out = {"rows": rows}
+    pre = prespecified_comparisons(sel, runs)
+    if pre:
+        out["prespecified"] = pre
+        text.append("\n**Pre-specified comparisons** (Holm within each model)\n")
+        text.append(prespecified_markdown(pre))
     try:
         vd = variance_decomposition(sel, runs)
         out["variance_decomposition"] = vd

@@ -149,6 +149,65 @@ def to_markdown(rows: list[dict[str, Any]], reference: str | None = "direct") ->
     return "\n".join(lines)
 
 
+# Primary family (one Holm correction per model): what each step of the
+# harness ladder adds over the arm just below it, at matched or explained calls.
+PRESPECIFIED = (
+    ("isolated_refine", "debate", "peer information at the same topology (6 vs 6 calls)"),
+    ("vote6", "debate", "communication vs. sampling at 6 calls"),
+    ("vote3", "role_vote", "personas vs. plain samples at 3 calls"),
+    ("debate", "role_debate", "personas inside debate at 6 calls"),
+    ("role_debate", "dermarbiter", "moderator decision (+1 call)"),
+)
+
+
+def holm(pvalues: list[float]) -> list[float]:
+    """Holm step-down adjusted p-values, in input order."""
+    order = sorted(range(len(pvalues)), key=lambda i: pvalues[i])
+    adjusted, running = [0.0] * len(pvalues), 0.0
+    for rank, i in enumerate(order):
+        running = max(running, min(1.0, (len(pvalues) - rank) * pvalues[i]))
+        adjusted[i] = running
+    return adjusted
+
+
+def prespecified_comparisons(cases: list[dict], runs: list[dict], n_boot: int = 5000,
+                             pairs=PRESPECIFIED) -> list[dict[str, Any]]:
+    """Paired top-1 differences for the pre-specified arm pairs, Holm-adjusted per model.
+
+    Uses repeat 0. Pairs with a missing arm are skipped (and so leave the family).
+    """
+    vec = {}
+    for run in runs:
+        cfg = run["manifest"]["config"]
+        if cfg.get("repeat", 0) == 0:
+            vec[(cfg["model"], cfg["method"])] = correctness(cases, run["records"])
+    out = []
+    for model in sorted({m for m, _ in vec}):
+        rows = []
+        for base, arm, question in pairs:
+            if (model, base) not in vec or (model, arm) not in vec:
+                continue
+            a, b = vec[(model, base)], vec[(model, arm)]
+            m = mcnemar_exact(a, b)
+            rows.append({"model": model, "base": base, "arm": arm, "question": question,
+                         **paired_bootstrap(a, b, n_boot), "only_base": m["only_reference"],
+                         "only_arm": m["only_arm"], "p_value": m["p_value"]})
+        for row, adj in zip(rows, holm([r["p_value"] for r in rows])):
+            row["p_holm"] = adj
+        out.extend(rows)
+    return out
+
+
+def prespecified_markdown(rows: list[dict[str, Any]]) -> str:
+    lines = ["| model | comparison | Δ top-1 [95% CI] | discordant (base/arm) | p | p (Holm) |",
+             "|---|---|---|---|---|---|"]
+    for r in rows:
+        lines.append(f"| {r['model']} | {r['arm']} − {r['base']} | {100 * r['delta']:+.1f} "
+                     f"[{100 * r['ci_low']:+.1f}, {100 * r['ci_high']:+.1f}] | "
+                     f"{r['only_base']}/{r['only_arm']} | {r['p_value']:.3f} | {r['p_holm']:.3f} |")
+    return "\n".join(lines)
+
+
 def variance_decomposition(cases: list[dict], runs: list[dict]) -> dict[str, Any]:
     """Share of outcome variance due to case, model, harness and their interactions.
 

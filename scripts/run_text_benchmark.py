@@ -13,7 +13,8 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from dermarbiter.research.text_benchmark import (  # noqa: E402
     TASK_SYSTEM, Config, GeminiProvider, METHOD_CALLS, OpenAICompatibleProvider, digest,
-    evaluate, run_case, strict_json, task_of, validate_cases, visible_case,
+    evaluate, response_schema, run_case, strict_json, task_of, validate_cases,
+    visible_case,
 )
 
 
@@ -101,7 +102,9 @@ def main(argv=None):
         prompt = "Rank the most likely conditions." if task_of(selected[0]) == "dx" else "Select the best answer."
         prompt += "\nCASE:\n" + json.dumps(visible_case(selected[0]), ensure_ascii=False)
         probe_cfg = Config(args.model, "probe", "direct", args.temperature, args.max_output_tokens)
-        c = provider.complete(system, prompt, probe_cfg, 0)
+        schema = response_schema(selected[0]) if getattr(provider, "accepts_schema", False) else None
+        c = (provider.complete(system, prompt, probe_cfg, 0, schema=schema) if schema
+             else provider.complete(system, prompt, probe_cfg, 0))
         print(json.dumps({"returned_model_version": c.model_version, "finish_reason": c.finish_reason,
                           "usage": c.usage, "text_preview": c.text[:300]}, indent=2))
         return

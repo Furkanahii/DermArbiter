@@ -179,7 +179,11 @@ def test_openai_compatible_contract(monkeypatch):
     assert row["provider"] == "openai_compatible"
     assert seen["url"] == "http://localhost:8000/v1/chat/completions"
     assert "SECRET" not in seen["url"] and seen["auth"] == "Bearer SECRET"
-    assert seen["body"]["response_format"] == {"type": "json_object"}
+    rf = seen["body"]["response_format"]
+    assert rf["type"] == "json_schema" and rf["json_schema"]["strict"] is True
+    items = rf["json_schema"]["schema"]["properties"]["differential"]["items"]
+    assert items["enum"] == CANDS          # decoding constrained to the candidate list
+    assert row["response_schema_sha256"]
     assert seen["body"]["max_tokens"] == 1024 and "tools" not in seen["body"]
     assert "SECRET" not in json.dumps(row)
 
@@ -269,3 +273,29 @@ def test_trivial_baselines_choose_constant_on_dev():
     assert out["constant_answer_chosen_on_dev"] in ("Eczema", "Tinea")
     assert out["test"]["constant_top1"] == 0.5
     assert out["test"]["uniform_random_top1"] == pytest.approx(0.25)
+
+
+def test_response_schema_mcq_and_plain_json_fallback(monkeypatch):
+    from dermarbiter.research.text_benchmark import VERSION, response_schema
+    mcq = {**dx_case("m"), "schema_version": VERSION, "question": "q",
+           "options": {"B": "b", "A": "a"}, "answer": "A"}
+    sch = response_schema(mcq)
+    assert sch["properties"]["answer"]["enum"] == ["A", "B", None]
+    assert sch["properties"]["confidence"]["maximum"] == 1
+    seen = {}
+
+    class R:
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+        def read(self):
+            return json.dumps({"model": "v1", "choices": [{"finish_reason": "stop",
+                               "message": {"content": "{}"}}]}).encode()
+
+    def fake(request, timeout):
+        seen["body"] = json.loads(request.data)
+        return R()
+    monkeypatch.setattr("dermarbiter.research.text_benchmark.urlopen", fake)
+    OpenAICompatibleProvider("http://x/v1").complete("s", "p", Config("m", "v1"), 0)
+    assert seen["body"]["response_format"] == {"type": "json_object"}   # no schema given
+    OpenAICompatibleProvider("http://x/v1", json_mode=False).complete("s", "p", Config("m", "v1"), 0, schema=sch)
+    assert "response_format" not in seen["body"]

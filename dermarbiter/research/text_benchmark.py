@@ -312,12 +312,19 @@ class OpenAICompatibleProvider:
         self._api_key, self.timeout = api_key, timeout
         self.json_mode, self.token_param = json_mode, token_param
 
-    def complete(self, system: str, prompt: str, config: Config, seed: int) -> Completion:
+    accepts_schema = True
+
+    def complete(self, system: str, prompt: str, config: Config, seed: int,
+                 schema: dict | None = None) -> Completion:
         body = {"model": config.model, "temperature": config.temperature, "seed": seed,
                 self.token_param: config.max_output_tokens,
                 "messages": [{"role": "system", "content": system},
                              {"role": "user", "content": prompt}]}
-        if self.json_mode:
+        if self.json_mode and schema is not None:
+            # Constrained decoding. Plain json_object mode lets small models emit "{}".
+            body["response_format"] = {"type": "json_schema", "json_schema": {
+                "name": "answer", "strict": True, "schema": schema}}
+        elif self.json_mode:
             body["response_format"] = {"type": "json_object"}
         headers = {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
         data = _post_json(self.base_url + "/chat/completions", body, headers, self.timeout)
@@ -330,6 +337,26 @@ class OpenAICompatibleProvider:
         finish = self._FINISH.get(choice.get("finish_reason"), str(choice.get("finish_reason")))
         return Completion(text, data.get("model", ""), usage, finish if choice else "NO_CANDIDATE",
                           data.get("id"))
+
+
+def response_schema(case: dict) -> dict:
+    """JSON Schema of the only valid answer for this case (used for constrained decoding).
+
+    Same schema for every arm, so constrained decoding never favours an arm.
+    Parsing stays strict regardless: providers that ignore the schema are still checked.
+    """
+    conf = {"type": ["number", "null"], "minimum": 0, "maximum": 1}
+    rationale = {"type": "string"}
+    if task_of(case) == "mcq":
+        answer = {"type": ["string", "null"], "enum": [*sorted(case["options"]), None]}
+        props, req = {"answer": answer}, ["answer"]
+    else:
+        diff = {"type": "array", "maxItems": 3,
+                "items": {"type": "string", "enum": list(case["candidates"])}}
+        props, req = {"differential": diff}, ["differential"]
+    props.update(confidence=conf, rationale=rationale)
+    return {"type": "object", "additionalProperties": False,
+            "required": req + ["confidence", "rationale"], "properties": props}
 
 
 def parse_answer(text: str, options: dict) -> dict:
@@ -434,6 +461,8 @@ def run_case(case: dict, config: Config, provider: Provider) -> dict:
               "status": "error", "final": None, "initial": None, "trace": trace}
     direct = INSTRUCTIONS[task]["direct"]
     structured = INSTRUCTIONS[task]["structured"]
+    schema = response_schema(case)
+    result["response_schema_sha256"] = digest(schema)
 
     def call(instruction: str, previous: Any = None, role: str | None = None) -> dict:
         prompt = instruction + "\nCASE:\n" + base
@@ -447,7 +476,10 @@ def run_case(case: dict, config: Config, provider: Provider) -> dict:
         trace.append(item)
         start = time.monotonic()
         try:
-            completion = provider.complete(system, prompt, config, seed)
+            if getattr(provider, "accepts_schema", False):
+                completion = provider.complete(system, prompt, config, seed, schema=schema)
+            else:
+                completion = provider.complete(system, prompt, config, seed)
             item.update(asdict(completion))
             if completion.model_version != config.expected_model_version:
                 raise ValueError("model_version_mismatch")

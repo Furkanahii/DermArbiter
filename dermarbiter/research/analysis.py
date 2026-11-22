@@ -75,6 +75,9 @@ def summarize(cases: list[dict], runs: list[dict], reference: str | None = "dire
         metrics = evaluate(cases, run["records"])
         recs = run["records"]
         tokens = [r["total_tokens"] for r in recs if r.get("total_tokens") is not None]
+        answers = Counter((r.get("final") or {}).get("answer") for r in recs)
+        answers.pop(None, None)
+        top_answer, top_n = answers.most_common(1)[0] if answers else (None, 0)
         row = {
             "arm": cfg["method"], "model": cfg["model"], "repeat": cfg["repeat"],
             "n": metrics["n_planned"], "accuracy": metrics["accuracy_all_cases"],
@@ -88,6 +91,10 @@ def summarize(cases: list[dict], runs: list[dict], reference: str | None = "dire
             "error_codes": dict(Counter(t["error_code"] for r in recs for t in r.get("trace", [])
                                         if t.get("error_code"))),
             "abstentions": metrics["n_abstain"],
+            # Collapse check: share of answered cases that got the single most frequent answer.
+            "top_answer": top_answer,
+            "top_answer_share": top_n / sum(answers.values()) if answers else None,
+            "n_transition_evaluable": metrics["n_transition_evaluable"],
             "publication_eligible": bool(run["manifest"].get("publication_eligible", False)),
             "run_dir": run["dir"],
         }
@@ -111,10 +118,13 @@ def summarize(cases: list[dict], runs: list[dict], reference: str | None = "dire
     return rows
 
 
+REVISING = ("self_refine", "isolated_refine", "debate", "role_debate", "dermarbiter")
+
+
 def to_markdown(rows: list[dict[str, Any]], reference: str | None = "direct") -> str:
     dx = any("top3" in r for r in rows)
     head = ["model", "arm", "n", "acc"] + (["top3", "soft"] if dx else []) + \
-           ["cover", "err", "calls/case", "tokens/case", "s/case"]
+           ["cover", "err", "mode", "rev +/−", "calls/case", "tokens/case", "s/case"]
     if reference:
         head += [f"Δ vs {reference} [95% CI]", "McNemar p"]
     lines = ["| " + " | ".join(head) + " |", "|" + "---|" * len(head)]
@@ -125,6 +135,9 @@ def to_markdown(rows: list[dict[str, Any]], reference: str | None = "direct") ->
         if dx:
             cells += [pct(r.get("top3")), pct(r.get("top1_soft"))]
         cells += [pct(r["coverage"]), str(r["errors"] + r["missing"]),
+                  pct(r.get("top_answer_share")),
+                  f"{r['beneficial']}/{r['harmful']}"
+                  if r["arm"] in REVISING and r.get("n_transition_evaluable") else "–",
                   "–" if r["calls_per_case"] is None else f"{r['calls_per_case']:.1f}",
                   "–" if r["tokens_per_case"] is None else f"{r['tokens_per_case']:.0f}"
                   + ("" if r["tokens_complete"] else "*"),
@@ -146,7 +159,37 @@ def to_markdown(rows: list[dict[str, Any]], reference: str | None = "direct") ->
         lines.append("\n_Pilot runs on unreviewed dev data: not for publication._")
     if any(not r["tokens_complete"] for r in rows):
         lines.append("_* token usage incomplete for some cases._")
+    lines.append("\n_mode: share of answered cases given the most frequent answer. "
+                 "rev +/−: initial→final wrong→right / right→wrong (descriptive)._")
     return "\n".join(lines)
+
+
+def repeat_agreement(cases: list[dict], runs: list[dict]) -> list[dict[str, Any]]:
+    """Run-to-run stability: same model and arm, repeat 0 against every later repeat.
+
+    Reports the share of planned cases with the same final answer (abstain/error
+    counts as its own value) and the top-1 accuracy difference.
+    """
+    by_key: dict[tuple, dict[int, dict]] = {}
+    for run in runs:
+        cfg = run["manifest"]["config"]
+        by_key.setdefault((cfg["model"], cfg["method"]), {})[cfg["repeat"]] = run
+    ids = [c["case_id"] for c in cases]
+    out = []
+    for (model, arm), reps in sorted(by_key.items()):
+        if 0 not in reps or len(reps) < 2:
+            continue
+        def finals(run):
+            recs = {r["case_id"]: r for r in run["records"]}
+            return [(recs[i].get("final") or {}).get("answer") if i in recs else None for i in ids]
+        base, base_ok = finals(reps[0]), correctness(cases, reps[0]["records"])
+        for rep_i in sorted(k for k in reps if k):
+            other, other_ok = finals(reps[rep_i]), correctness(cases, reps[rep_i]["records"])
+            out.append({"model": model, "arm": arm, "repeat": rep_i, "n": len(ids),
+                        "same_final": sum(a == b for a, b in zip(base, other)) / len(ids),
+                        "accuracy_delta": (sum(other_ok) - sum(base_ok)) / len(ids),
+                        "correctness_flips": sum(a != b for a, b in zip(base_ok, other_ok))})
+    return out
 
 
 # Primary family (one Holm correction per model): what each step of the

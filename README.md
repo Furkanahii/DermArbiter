@@ -14,31 +14,34 @@ mock runs demonstrate software behavior only.
 
 ## Research status — November 2026
 
-An isolated text MCQ pilot now implements direct/structured answering,
-self-refinement, independent voting, isolated panel refinement and one-round
-debate. It records actual provider usage and model versions, and scores missing
-or failed cases in the planned denominator. The Gemini REST adapter has offline
-contract tests; live API verification and an accepted main cohort are pending.
+The first paper is a controlled **text-only comparison of agentic harnesses** on
+dermatology cases: ten arms (single call, self-refinement, voting, isolated
+refinement, debate, and DermArbiter's persona and moderator designs) on the same
+backbone, cases and seeds, with every call counted. Images are a later phase.
 
-- [Expanded 2026 literature and novelty assessment (Turkish)](docs/literature_expanded_2026_tr.md)
-- [Research decisions and protocol v2 (Turkish)](docs/research_decisions_v2_tr.md)
-- [Text MCQ pilot runbook](docs/text_benchmark_runbook.md)
+Tracks: SCIN patient self-reports (rank ≤3 of 30 conditions), MedMCQA skin, and
+MedXpertQA dermatology. A local dev pilot (2 open-weight models × 2 tracks × 10 arms)
+is complete; main runs on free GPU notebooks wait for the data review and freeze.
+The benchmark code (`dermarbiter/research/`, `scripts/run_text_benchmark.py`) needs
+only the Python standard library.
 
-The first paper is being scoped as a controlled **text-only comparison of
-reasoning approaches**, with image-based evaluation reserved for a later phase.
-The existing experiment baseline is a legacy two-role mock scaffold with tools,
-not a single-call, tool-free baseline. Live execution is not implemented in the
-`dermarbiter.experiments` runners; they reject non-mock requests and label their
-mock outputs explicitly. The separate real E2E scripts still require validation
-for the new study protocol.
+Current documents:
 
-- [Repository review and implementation priorities (Turkish)](docs/research_readiness_2026_tr.md)
-- [2026 literature review (Turkish)](docs/literature_2026_tr.md)
-- [Proposed text-only protocol (Turkish)](docs/text_only_protocol_2026_tr.md)
+- [Study report (Turkish)](docs/study_report_tr.md): questions, arms, statistics, pilot results
+- [Paper draft (English)](docs/paper/draft_en.md)
+- [2026 literature report (Turkish)](docs/literature_report_2026_tr.md)
+- [Runbook](docs/text_benchmark_runbook.md) and [free-GPU notebook](notebooks/08_text_benchmark_kaggle.ipynb)
+- [Data review and freeze (Turkish)](docs/data_review_tr.md)
 
-Dataset preflight: `python scripts/validate_text_benchmark.py cases.jsonl`.
-This validates the proposed primary-track schema, not clinical correctness.
-Existing runners do not yet consume this new contract.
+Earlier planning notes (superseded by the documents above, kept for history):
+[research decisions v2](docs/research_decisions_v2_tr.md),
+[text-only protocol draft](docs/text_only_protocol_2026_tr.md),
+[repository review](docs/research_readiness_2026_tr.md),
+[first](docs/literature_2026_tr.md) and [expanded](docs/literature_expanded_2026_tr.md)
+literature notes.
+
+The legacy `dermarbiter.experiments` runners are a mock scaffold with tools; they are
+not used by the text benchmark and reject non-mock requests.
 
 ---
 

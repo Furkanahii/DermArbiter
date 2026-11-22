@@ -236,6 +236,45 @@ saat sürer.
 * **Etiket belirsizliği:** MedMCQA etiket gürültüsü içeriyor. SCIN etiketleri panel
   ağırlıklı ve beraberlikli.
 
+## 9b. Proje değerlendirmesi ve riskler (23 Kasım 2026)
+
+**Sağlam olanlar.** Tasarım hakem itirazlarının çoğunu önceden karşılıyor:
+
+* **Adil karşılaştırma:** eşit ve sayılmış çağrı bütçeleri, ortak tohumlar, bütün
+  kollara aynı şema.
+* **Önceden sabitlenmiş analiz:** beş karşılaştırma ve Holm düzeltmesi.
+* **Payda:** planlanan tüm vakalar paydada.
+* **Kodla zorlanan kurallar:** test kapısı ve manifest hash'leri.
+* **Tekrarlanabilir veri:** hash'li veri üretimi.
+* **Erken yakalanan hatalar:** pilot test bölmesine dokunmadan beş gerçek hata
+  buldu, hepsi düzeltildi.
+
+Harcama şimdiye kadar sıfır.
+
+**Riskler, önem sırasıyla:**
+
+1. **SCIN'de tavan/taban sorunu.** Görüntüsüz hasta beyanı zor bir görev ve sabit
+   cevap tabanı %25. 3–4B modeller tabanda kaldı. Daha büyük modeller de tabana yakın
+   kalırsa ana track'te harness farkı görülemez. Önlem: 7B yerel kontrolü (bkz. 7.4).
+   Sonuç zayıfsa MedMCQA/MedXpertQA birincil, SCIN ikincil analiz yapılır; bu karar
+   test bölmesine bakılmadan verilir.
+2. **Güç.** 600 SCIN vakasıyla saptanabilir fark 4–6 puan. Literatürde harness
+   etkileri çoğu zaman 1–5 puan. Kaggle'da ilk iş verim ölçülmeli. Verim yeterliyse
+   SCIN testinin tamamı (1.737) koşulur ve saptanabilir fark 2–4 puana iner.
+3. **İki küçük açık model ailesi.** Bu durum S4'ün (sıralama backbone'a göre korunuyor
+   mu?) genellenebilirliğini sınırlıyor. Kapalı, güçlü bir model ancak ayrı bir bütçe
+   kararıyla eklenebilir.
+4. **Tek tekrar.** Koşudan koşuya kararlılık henüz ölçülmedi. Analiz aracı hazır
+   (`repeat_agreement`); dev pilotu Kaggle'da 2 tekrarla koşulmalı.
+5. **Açık veri kararları.** Şemsiye etiketler ([data_review_tr.md](data_review_tr.md)
+   4b) ve insan gözden geçirmesi tamamlanmadan test bölmesi açılamaz.
+6. **Adlandırma.** Makaledeki `dermarbiter` kolu, DermArbiter'in persona ve moderatör
+   tasarımının araçsız bir uyarlaması; depodaki LangGraph/araç sisteminin kendisi
+   değil. Makale bunu açıkça söylüyor; hakem sorusuna hazır olmak gerekiyor.
+7. **Kirlenme.** MedMCQA'nın açık train bölmesi ön eğitim verisinde olabilir. Bu
+   sınırlılık olarak yazılıyor; mutlak doğruluk değil, kollar arası farklar
+   yorumlanıyor.
+
 ## 10. Takvim ve durum
 
 Takvim [research_decisions_v2_tr.md](research_decisions_v2_tr.md) 7. bölümde.

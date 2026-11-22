@@ -21,6 +21,22 @@ python scripts/make_review_sheet.py data/text_benchmark/medxpertqa_derm.jsonl --
 * **Gizlilik:** tablolar veri içeriği taşıdığı için git'e eklenmiyor; yerelde
   üretiliyor.
 
+## 1b. Otomatik ön tarama
+
+```bash
+python scripts/prescreen_data.py data/text_benchmark/*.jsonl
+```
+
+İnsan gözden geçirmesinin yerine geçmiyor; yalnız bariz sorunları önceden yakalıyor.
+Bakılanlar: SCIN metninde aday tanı adlarından bir kelime (etiket sızıntısı); MCQ'da
+görüntüye atıf, sıraya bağlı şık ("all of the above", "A and B"; karıştırma bunları
+bozar), aynı metinli şıklar, soru gövdesine gömülü şıkların şık alanıyla çelişmesi.
+
+**Sonuç (23 Kasım 2026):** üç track'te de işaretli vaka yok (SCIN 2.154, MedMCQA
+1.269, MedXpertQA 48). Not: MedXpertQA'nın orijinal sorusu şık listesini
+"Answer Choices: (A) ..." olarak gövdede taşıyor; şıklar karıştırılmadığı için
+harfler birebir tutuyor, model şıkları iki kez görüyor. Zararsız, makalede yazılacak.
+
 ## 2. Her satırda bakılacaklar
 
 | Sütun | Ne zaman `0` yazılır |
@@ -54,6 +70,30 @@ tek başına `0` gerekçesi değil.
   "sağlıklı görünen cilt" deyip "büyüme" bildirilebiliyor.
 * **MedMCQA şıkları:** şıklar yeniden karıştırıldı. Orijinal yazım hataları
   (örneğin "Schouleiln") düzeltilmedi.
+
+## 4b. Açık karar: şemsiye etiketler (dondurmadan önce)
+
+SCIN aday listesinde iki şemsiye etiket var: "Acute dermatitis, NOS" ve
+"Acute and chronic dermatitis". Pilotta küçük modeller cevaplarının üçte ikisinde
+bunları seçti (200 nihai cevabın 133'ü), oysa referansta nadiren doğru cevap:
+
+| Bölme | Vaka | İlk etiketlerden biri şemsiye | İlk etiket yalnız şemsiye | Şemsiyeye herhangi bir ağırlık |
+|---|---|---|---|---|
+| dev | 417 | 13 (%3,1) | 8 (%1,9) | 24 (%5,8) |
+| test | 1.737 | 71 (%4,1) | 28 (%1,6) | 125 (%7,2) |
+
+Seçenekler:
+
+* **A. Olduğu gibi bırak.** SCIN'e sadık. Yığılma kollar arası farkı bastırabilir;
+  her kolun en sık cevap payı (`mode`) raporlanır.
+* **B. İki etiketi aday listeden çıkar.** Referansı yalnız şemsiye olan vakalar
+  (dev 8, test 28) düşer; beraberlikte diğer etiketi olan vakalar kalır. Aday sayısı
+  28'e iner. Veri yeniden üretilir, rastgele taban değişir.
+* **C. Listeyi koru, prompta "en özgül tanıyı seç" ekle.** Bütün kollara aynı
+  ekleme. Prompt değiştiği için dev pilotu tekrarlanır.
+
+Karar klinik ortak yazarın ya da hocanın. Test bölmesine bakılmadan, yalnız bu tablo
+ve dev sonuçlarıyla verilmeli; kararın kendisi ve gerekçesi makalede yazılır.
 
 ## 5. Dondurma
 

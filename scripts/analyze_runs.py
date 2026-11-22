@@ -15,7 +15,8 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from dermarbiter.research.analysis import (  # noqa: E402
-    load_run, prespecified_comparisons, prespecified_markdown, read_jsonl, summarize,
+    load_run, prespecified_comparisons, prespecified_markdown, read_jsonl, repeat_agreement,
+    summarize,
     to_markdown, variance_decomposition,
 )
 from dermarbiter.research.text_benchmark import digest, validate_cases  # noqa: E402
@@ -45,6 +46,14 @@ def main(argv=None):
         out["prespecified"] = pre
         text.append("\n**Pre-specified comparisons** (Holm within each model)\n")
         text.append(prespecified_markdown(pre))
+    stab = repeat_agreement(sel, runs)
+    if stab:
+        out["repeat_agreement"] = stab
+        text.append("\n**Run-to-run stability** (repeat 0 vs. later repeats)\n")
+        text.append("| model | arm | repeat | same final | Δ top-1 | correctness flips |\n|---|---|---|---|---|---|")
+        for r in stab:
+            text.append(f"| {r['model']} | {r['arm']} | {r['repeat']} | {100 * r['same_final']:.1f}% | "
+                        f"{100 * r['accuracy_delta']:+.1f} | {r['correctness_flips']}/{r['n']} |")
     try:
         vd = variance_decomposition(sel, runs)
         out["variance_decomposition"] = vd

@@ -1,0 +1,28 @@
+name: research-tests
+
+# Offline tests of the text benchmark, statistics and data tools.
+# No network calls to model providers; no secrets are used.
+on:
+  push:
+    paths: ["dermarbiter/research/**", "scripts/**", "tests/**", ".github/workflows/research-tests.yml"]
+  pull_request:
+    paths: ["dermarbiter/research/**", "scripts/**", "tests/**", ".github/workflows/research-tests.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      # The benchmark is stdlib-only. --noconftest skips tests/conftest.py, which
+      # imports the legacy LangGraph stack these tests do not use.
+      - run: pip install pytest
+      - run: python -m pytest -q --noconftest tests/test_research_analysis.py tests/test_text_benchmark.py tests/test_text_harness_v2.py

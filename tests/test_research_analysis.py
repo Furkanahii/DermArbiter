@@ -227,3 +227,31 @@ def test_reaggregate_rescores_borda_ties_without_calls():
     assert reaggregate(stale)["final"] == rec["final"] and reaggregate(stale)["status"] == "ok"
     mcq = {**stale, "task": "mcq"}
     assert reaggregate(mcq) is mcq
+
+
+def test_mode_share_and_repeat_agreement():
+    from dermarbiter.research.analysis import repeat_agreement
+    cases = [dx_case(f"c{i}") for i in range(4)]
+    r0 = _run(cases, "vote3", lambda c: "Psoriasis" if c["case_id"] != "c3" else "Eczema")
+    r1 = _run(cases, "vote3", lambda c: "Psoriasis")
+    r1["manifest"]["config"] = {**r1["manifest"]["config"], "repeat": 1}
+    rows = summarize(cases, [r0], reference=None, n_boot=100)
+    assert rows[0]["top_answer"] == "Psoriasis" and rows[0]["top_answer_share"] == pytest.approx(0.75)
+    assert "mode" in to_markdown(rows, reference=None)
+    stab = repeat_agreement(cases, [r0, r1])
+    assert len(stab) == 1 and stab[0]["same_final"] == pytest.approx(0.75)
+    assert stab[0]["correctness_flips"] == 1 and stab[0]["accuracy_delta"] == pytest.approx(0.25)
+    assert repeat_agreement(cases, [r0]) == []
+
+
+def test_prescreen_flags_leaks_and_order_dependent_options():
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from prescreen_data import flags
+    words = {"psoriasis", "eczema"}
+    assert flags({"case_text": "They describe it as a rash."}, words) == []
+    assert flags({"case_text": "My doctor said psoriasis."}, words) == ["name_in_text"]
+    mcq = {"question": "Which drug? Answer Choices: (A) X (B) Y", "options": {"A": "X", "B": "Y"}}
+    assert flags(mcq, set()) == []
+    assert flags({**mcq, "options": {"A": "Y", "B": "X"}}, set()) == ["choices_mismatch"]
+    assert flags({"question": "The lesion in the image is", "options": {"A": "X", "B": "All of the above"}},
+                 set()) == ["image_cue", "positional_option"]

@@ -195,6 +195,7 @@ Top-1 doğruluk / kapsam, %. SCIN güncel toplama kuralıyla yeniden puanlandı.
 1. **3–4B modeller SCIN'de tabanda.** Bu 10 vakada sabit "Eczema" cevabı %20 alıyor;
    Gemma `direct` de %20, Qwen %10. Harness farkını görmek için tabanın üstünde bir
    backbone gerekiyor. Ana koşularda en az 7B (örneğin Qwen 2.5 7B, Gemma 3 12B).
+   7.4'teki kontrol 7B'nin de yetmediğini gösterdi.
 2. **Şemsiye etiketlere yığılma.** 200 nihai SCIN cevabının 75'i "Acute and chronic
    dermatitis", 58'i "Acute dermatitis, NOS". Bu iki etiket pilot vakalarında yalnız
    bir kez doğru. Makalede en sık tahminin payı raporlanacak. Aday listeden bu
@@ -203,6 +204,55 @@ Top-1 doğruluk / kapsam, %. SCIN güncel toplama kuralıyla yeniden puanlandı.
 3. **Kesinleştirici pilot.** Backbone değişeceği ve 4 ile 5 numaralı düzeltmeler kodu
    değiştirdiği için Kaggle'da son backbone'larla aynı 10 vakalık dev pilot tekrar
    koşulacak; test koşusu ancak ondan sonra.
+
+### 7.4 7B backbone kontrolü (23 Kasım)
+
+**Soru:** 7.3'teki ilk çıkarım "en az 7B" diyordu. 7B, SCIN'de sabit cevap tabanının
+üstüne çıkıyor mu?
+
+**Koşu:** Qwen 2.5 7B (Ollama, yerel), `direct` ve `structured`, her track'ten 40 dev
+vakası. İlk 10 vaka 3–4B pilotuyla aynı. Ayarlar pilotla aynı: sıcaklık 0,7, tek
+tekrar. 160 çağrı, hata yok, maliyet sıfır.
+
+| Track | Kol | top-1 | Sabit taban | 7B − taban | McNemar p | En sık cevap payı |
+|---|---|---|---|---|---|---|
+| SCIN | `direct` | 2/40 (%5,0) | 10/40 (%25, "Eczema") | −20 [−35, −5] | 0,021 | %50 ("Acute dermatitis, NOS") |
+| SCIN | `structured` | 3/40 (%7,5) | 10/40 | −17,5 [−32,5, −2,5] | 0,065 | %49 |
+| MedMCQA | `direct` | 28/40 (%70,0) | 12/40 (%30, hep "A") | +40 [+20, +60] | 0,002 | %31 |
+| MedMCQA | `structured` | 27/40 (%67,5) | 12/40 | +37,5 [+17,5, +57,5] | 0,003 | %34 |
+
+Köşeli parantezde 5.000 tekrarlı eşleştirilmiş bootstrap ile %95 aralık.
+
+**Bulgular:**
+
+1. **7B, SCIN'de tabanın altında.** Sabit "Eczema" cevabından anlamlı olarak kötü
+   (`direct`, p = 0,021). Aynı 10 vakada 3–4B modellerden de iyi değil (7B 0/10;
+   Qwen 3B 1/10, Gemma 4B 2/10). Büyüklük tek başına sorunu çözmüyor.
+2. **Şemsiye yığılması 7B'de daha güçlü.** 38 nihai cevabın 28'i (%74) iki şemsiye
+   etiketten biri. Bu 40 vakada şemsiye etiket yalnız 2 vakada referans.
+3. **Şemsiyeleri atlamak da yetmiyor.** Bu bir post hoc, betimleyici sayım: her
+   cevabın listesindeki ilk şemsiye olmayan tanı alınırsa top-1 9/40 (%22,5) olur.
+   Bu da tabanın (%25) altında. Yani 4b'deki B seçeneği yığılmayı giderir ama
+   SCIN'i tek başına tabanın üstüne taşımaz.
+4. **MedMCQA sağlıklı.** %70 doğruluk, şık tabanının (%30) çok üstünde, yığılma yok
+   (en sık şık %31). 3–4B'ye göre ilk 10 vakada fark yok (7B 6/10; 3B 7/10, 4B 6/10).
+5. **Hız:** 7B yerelde vaka başına SCIN ~25 sn, MedMCQA ~15 sn.
+
+**Sınırlılıklar:** n = 40, tek tekrar, tek model ailesi, gözden geçirilmemiş dev
+verisi. Yine de SCIN farkı yönü ve büyüklüğüyle pilottaki tabloyu doğruluyor.
+
+**Çıkarımlar** (karar hocanın; test bölmesine bakılmadan verilmeli):
+
+* **Track önceliği.** MedMCQA ve MedXpertQA birincil track olmaya aday. SCIN ancak
+  bir modelin dev bölmesinde tabanı açıkça geçtiği gösterilirse birincil kalmalı.
+  Aksi halde ikincil analiz ya da "görüntüsüz hasta beyanının sınırı" bulgusu olarak
+  raporlanır. Bu kendi başına yayımlanabilir bir sonuç: kollar arası fark aranan
+  track'te önce modelin işe yarar bir sinyal alması gerekiyor.
+* **Daha güçlü ücretsiz backbone denemesi.** Kaggle'daki kesinleştirici dev pilotunda
+  SCIN için bir 12–14B model (örneğin Gemma 3 12B veya Qwen 2.5 14B) aynı 40 vakada
+  `direct` ile denenebilir. Tabanı geçmezse karar netleşir.
+* **Prompt (4b, C seçeneği).** "En özgül tanıyı seç" eklemesi yığılmayı azaltabilir,
+  ama 3. bulguya göre doğruluğu tabanın üstüne taşıması beklenmiyor.
 
 ## 8. Ana deneyler için hesaplama planı (maliyetsiz)
 
@@ -253,11 +303,11 @@ Harcama şimdiye kadar sıfır.
 
 **Riskler, önem sırasıyla:**
 
-1. **SCIN'de tavan/taban sorunu.** Görüntüsüz hasta beyanı zor bir görev ve sabit
-   cevap tabanı %25. 3–4B modeller tabanda kaldı. Daha büyük modeller de tabana yakın
-   kalırsa ana track'te harness farkı görülemez. Önlem: 7B yerel kontrolü (bkz. 7.4).
-   Sonuç zayıfsa MedMCQA/MedXpertQA birincil, SCIN ikincil analiz yapılır; bu karar
-   test bölmesine bakılmadan verilir.
+1. **SCIN'de taban sorunu (gerçekleşti).** Görüntüsüz hasta beyanı zor bir görev ve
+   sabit cevap tabanı %25. 3–4B modeller tabanda kaldı; 7B kontrolünde Qwen 2.5 7B
+   tabanın anlamlı olarak altında (%5, 7.4). Önerilen önlem: MedMCQA/MedXpertQA
+   birincil, SCIN ikincil analiz. Kaggle'da 12–14B bir model tabanı geçerse SCIN
+   yeniden birincil olabilir. Karar test bölmesine bakılmadan verilir.
 2. **Güç.** 600 SCIN vakasıyla saptanabilir fark 4–6 puan. Literatürde harness
    etkileri çoğu zaman 1–5 puan. Kaggle'da ilk iş verim ölçülmeli. Verim yeterliyse
    SCIN testinin tamamı (1.737) koşulur ve saptanabilir fark 2–4 puana iner.
@@ -283,5 +333,6 @@ Takvim [research_decisions_v2_tr.md](research_decisions_v2_tr.md) 7. bölümde.
 |---|---|
 | Tamam | Pipeline düzeltmeleri, veri builder'ları, 10 kol, istatistik, literatür raporu |
 | Tamam | Yerel pilot (planlanan 1–6 Aralık yerine 22–23 Kasım); paralel runner; Kaggle notebook'u |
-| Sırada | Veri gözden geçirme ve dondurma (insan onayı); Kaggle'da son backbone'larla dev pilot; ana koşular (7–13 Aralık) |
+| Tamam | 7B backbone kontrolü (7.4): SCIN tabanın altında, MedMCQA sağlıklı |
+| Sırada | Track önceliği kararı (7.4, hocayla); veri gözden geçirme ve dondurma (insan onayı); Kaggle'da son backbone'larla dev pilot; ana koşular (7–13 Aralık) |
 | Sonra | Görüntü aşaması (2. aşama), guideline-RAG ve heterojen panel kolları (ek analiz) |

@@ -92,6 +92,11 @@ Seçenekler:
 * **C. Listeyi koru, prompta "en özgül tanıyı seç" ekle.** Bütün kollara aynı
   ekleme. Prompt değiştiği için dev pilotu tekrarlanır.
 
+**7B kontrolünden ek bilgi** ([study_report_tr.md](study_report_tr.md) 7.4): Qwen 2.5 7B'de
+yığılma daha güçlü (40 vakada nihai cevapların %74'ü şemsiye). Şemsiyeler atlanınca
+top-1 %22,5 oluyor, sabit tabanın (%25) hâlâ altında. B seçeneği yığılmayı giderir,
+ama SCIN'in taban sorununu tek başına çözmez.
+
 Karar klinik ortak yazarın ya da hocanın. Test bölmesine bakılmadan, yalnız bu tablo
 ve dev sonuçlarıyla verilmeli; kararın kendisi ve gerekçesi makalede yazılır.
 

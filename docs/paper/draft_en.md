@@ -202,8 +202,11 @@ looping call fails every multi-call arm on that case.
 Two open-weight backbone families, served locally through an OpenAI-compatible
 endpoint (Ollama). In the pilot, 3–4B models scored at the constant-answer
 baseline on SCIN-text (Appendix B), which leaves no room to see harness effects.
-The main runs therefore use backbones of at least 7B. [TODO: final choice on dev,
-e.g. Qwen 2.5 7B and Gemma 3 12B.]
+A follow-up check with Qwen 2.5 7B on 40 dev cases did not help: it scored below
+the constant baseline on SCIN-text (5% vs. 25%, exact McNemar p = 0.021) while
+scoring 70% on MedMCQA-skin (baseline 30%). [TODO: final backbones and track
+priority on dev, before the test split: either a 12–14B backbone that clears the
+SCIN baseline, or MCQ tracks primary and SCIN-text secondary.]
 
 - **Version check:** the returned model string must equal the pinned one.
 - **Hardware:** free GPU notebooks; cases are sent concurrently. The runner's
@@ -350,6 +353,27 @@ with the current tie rule.
   only one pilot case. We will report the share of the most frequent prediction per
   arm. [TODO: decide with the clinical co-author whether umbrella labels stay in
   the candidate list; the decision must be made before the test split is opened.]
+
+### B.1 7B backbone check
+
+Qwen 2.5 7B, `direct` and `structured`, 40 dev cases per track (the first 10 are
+the pilot cases), same settings as the pilot, one repeat, no errors.
+
+| track | arm | top-1 | constant baseline | difference [95% CI] | McNemar p | mode share |
+|---|---|---|---|---|---|---|
+| SCIN-text | direct | 2 / 40 | 10 / 40 ("Eczema") | −20.0 [−35.0, −5.0] | 0.021 | 50% |
+| SCIN-text | structured | 3 / 40 | 10 / 40 | −17.5 [−32.5, −2.5] | 0.065 | 49% |
+| MedMCQA-skin | direct | 28 / 40 | 12 / 40 (always "A") | +40.0 [+20.0, +60.0] | 0.002 | 31% |
+| MedMCQA-skin | structured | 27 / 40 | 12 / 40 | +37.5 [+17.5, +57.5] | 0.003 | 34% |
+
+CIs are paired bootstrap (5,000 resamples).
+
+- **Collapse is stronger at 7B:** 28 of 38 SCIN finals (74%) are one of the two
+  umbrella labels, which are the top reference in 2 of the 40 cases.
+- **Removing the umbrella labels alone would not clear the baseline.** As a post hoc
+  count, taking the first non-umbrella label of each differential gives 9 / 40
+  (22.5%).
+- **On the 10 shared cases** 7B is no better than the 3–4B models on either track.
 
 ## Reproducibility
 

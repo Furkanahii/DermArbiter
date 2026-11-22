@@ -187,3 +187,18 @@ def test_workers_do_not_change_predictions(tmp_path):
     finally:
         server.shutdown()
     assert outs[1] == outs[4] and [c for c, _, _ in outs[1]] == [c["case_id"] for c in cases]
+
+
+def test_review_sheet_is_fixed_and_shows_only_visible_text(tmp_path):
+    import csv
+    path = _write(tmp_path, [dx_case(f"c{i}") for i in range(10)])
+    outs = []
+    for k in range(2):
+        out = tmp_path / f"r{k}.csv"
+        subprocess.run([sys.executable, str(ROOT / "scripts/make_review_sheet.py"), str(path),
+                        "--n", "4", "--out", str(out)], check=True, capture_output=True)
+        outs.append(list(csv.DictReader(out.open())))
+    assert outs[0] == outs[1] and len(outs[0]) == 4
+    row = outs[0][0]
+    assert row["shown_to_model"] == dx_case(row["case_id"])["case_text"]
+    assert "*" in row["reference"] and row["text_ok"] == ""

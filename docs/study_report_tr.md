@@ -84,10 +84,14 @@ ikincil analiz.
   Altın etiket benzeri alanlar prompttan filtreleniyor.
 * **Aynı çıktı şeması:** her kola aynı vaka bazlı JSON şeması veriliyor (constrained
   decoding). Şema cevabı geçerli şıklarla veya aday tanılarla sınırlıyor, güveni
-  zorunlu sayı yapıyor, gerekçeyi 1000 karakterle sınırlıyor. Bu kısıtların üçü de
-  pilotta görülen gerçek hatalardan sonra eklendi (bkz. 7. bölüm).
+  zorunlu sayı yapıyor, gerekçeyi 1000 karakterle sınırlıyor. Bu kısıtlar pilotta
+  görülen gerçek hatalardan sonra eklendi (bkz. 7. bölüm).
 * **Payda:** planlanan tüm vakalar paydada. Eksik, hatalı ve çekimser cevaplar doğru
-  sayılmıyor. Oylama beraberliği çekimser kalıyor.
+  sayılmıyor.
+* **Toplama:** MCQ'da çoğunluk oyu; beraberlik çekimser. SCIN'de Borda (3/2/1 puan);
+  ilk sıradaki puan beraberliği birinci sıra oy sayısıyla kırılıyor, o da eşitse
+  çekimser. Ajanların aynı tanıyı listede tekrar etmesi hata sayılmıyor; tekrar
+  atılıyor, sıra korunuyor (top-1 değişmez).
 * **Kayıt:** her koşu için manifest tutuluyor: kod ve şema hash'i, istenen ve dönen
   model sürümü, zaman aşımı, `publication_eligible` bayrağı.
 
@@ -100,9 +104,17 @@ ikincil analiz.
   McNemar testi; birincil aileye Holm düzeltmesi.
 * **Varyans ayrıştırması:** vaka × model × harness kareler toplamı (S4).
 
-**Örneklem büyüklüğü.** Kaba hesap: eşleşmeyen çift oranı ~%20 ve Holm ile α=0,01
-alınırsa, %80 güçle saptanabilecek en küçük fark yaklaşık 1.737 SCIN test vakasında
-3,7 puan, 600 vakada 6,2 puan, 300 vakada 8,8 puan.
+**Örneklem büyüklüğü.** Eşleşmeyen çift oranı p ve Holm ile α=0,01 alınırsa, %80
+güçle saptanabilecek en küçük fark ≈ 3,42·√(p/n). Pilotta beş birincil karşılaştırmada
+gözlenen oran %7 (200 çiftte 14; SCIN %3, MedMCQA %11). Küçük modeller SCIN'de tabana
+yakın olduğu için bu oran büyük modellerde artacaktır; planlamada temkinli değer
+%20 kullanılıyor.
+
+| n | p = %7 | p = %20 |
+|---|---|---|
+| 1.737 (SCIN testin tamamı) | 2,2 puan | 3,7 puan |
+| 600 | 3,7 puan | 6,2 puan |
+| 400 | 4,5 puan | 7,6 puan |
 
 ## 7. Pilot (yerel, ücretsiz)
 
@@ -111,21 +123,86 @@ alınırsa, %80 güçle saptanabilecek en küçük fark yaklaşık 1.737 SCIN te
 * **Amaç:** sonuç değil sağlamlık. Format hataları, çekimserlik, token ve süre
   ölçülüyor.
 
-Pilotun şimdiden yakaladığı ve düzelttiği üç hata:
+Pilot 22 Kasım 16:31'de başladı, 23 Kasım 01:15'te bitti: 40 koşu (2 model × 2 track ×
+10 kol), 400 vaka-koşusu, 1.673 çağrı, çağrı başına ~19 sn. Bütün koşular aynı kod ve
+şema hash'iyle tamamlandı.
+
+### 7.1 Pilotun yakaladığı ve düzeltilen hatalar
+
+İlk üçü pilotun ilk denemesinde görüldü; şema değiştiği için o koşu
+(`local_pilot_v0_nocap`) arşivlendi ve pilot baştan başlatıldı. Son ikisi asıl pilotta
+görüldü.
 
 1. **Boş JSON:** düz JSON modunda Gemma `{}` döndürüyordu (`direct`'te 10/10
-   geçersiz). Çözüm: vaka bazlı JSON şeması; sonrasında 20 vakada 0 hata.
-2. **Gerekçe döngüsü:** bir SCIN vakasında Gemma gerekçe metninde döngüye girdi,
-   1024 token sınırına kadar yazdı ve 120 sn zaman aşımına düştü. Her çok çağrılı
-   kolda aynı vaka düştüğü için kollar arası farkı sistematik biçimde bozuyordu.
-   Çözüm: gerekçeye 1000 karakter sınırı ve kayıtlı `--timeout` seçeneği.
-3. **Eksik güven:** Qwen tanı verirken güveni `null` bırakıyordu ve cevap geçersiz
-   sayılıyordu. Çözüm: güven şemada zorunlu sayı; çekimser cevaplarda yok sayılıyor.
+   geçersiz). Çözüm: vaka bazlı JSON şeması.
+2. **Gerekçe döngüsü:** Gemma bir SCIN vakasında gerekçede döngüye girip zaman
+   aşımına düştü; aynı vaka her çok çağrılı kolda düştüğü için kollar arası farkı
+   sistematik bozuyordu. Çözüm: gerekçeye 1000 karakter sınırı, kayıtlı `--timeout`.
+3. **Eksik güven:** Qwen tanı verirken güveni `null` bırakıyordu. Çözüm: güven
+   şemada zorunlu sayı; çekimser cevaplarda yok sayılıyor.
+4. **Tekrarlanan tanı:** Qwen 3 çağrıda listeye aynı tanıyı iki kez yazdı
+   (`["Acne", "Acne"]`). Ollama şemadaki tekrarsızlık kuralını uygulamıyor ve parser
+   bunu geçersiz sayıyordu: 3 vaka düştü. Çözüm: tekrar atılıyor, sıra korunuyor,
+   sayısı kaydediliyor (`duplicates_dropped`). Bu vakalar yeni model çağrısı olmadan
+   yeniden puanlanamaz; tabloda hata olarak duruyor.
+5. **Borda beraberliği:** iki ajanın ilk sıraya koyduğu tanı, üç ajanın da ikinci
+   sıraya koyduğu tanıyla puanda eşitleniyordu (3+3 = 2+2+2) ve panel çekimser
+   kalıyordu. Toplam 26 çekimser sonucun 15'i buydu ve en çok rol kollarını
+   vuruyordu, çünkü personalar daha farklı cevap veriyor. Kişi bazında
+   çekimserlik düşük: uzman %4,0, genel %2,5, şüpheci %4,5. Çözüm: puan
+   beraberliği birinci sıra oy sayısıyla kırılıyor. Toplanan cevap hiçbir prompta
+   girmediği için pilot model çağırmadan, birebir yeniden puanlandı
+   (`scripts/reaggregate_runs.py`): 13 nihai cevap çekimserden tanıya döndü; hiçbiri doğru
+   değildi, top-1 değişmedi, kapsam arttı.
 
-Şema değiştiği için ilk Gemma koşusu (`local_pilot_v0_nocap`) arşivlendi ve pilot iki
-model için baştan başlatıldı. Sonuç tablosu bu bölüme eklenecek.
+Kalan tek açıklanamayan hata: Gemma bir SCIN çağrısında gerekçenin içine kıvrık
+tırnak yazdı, ardından anlamsız metin üretti ve sunucu yanıtı bitiş nedeni
+vermeden kesti (`incomplete_generation`). Aynı çağrı `role_debate` ile `dermarbiter`'da
+ortak olduğu için iki kolda birlikte görülüyor; bu ikisinin karşılaştırmasını bozmuyor.
 
-> **Pilot sonuçları:** koşu sürüyor.
+### 7.2 Sonuçlar (10 dev vaka; sağlamlık testi, sonuç değil)
+
+Top-1 doğruluk / kapsam, %. SCIN güncel toplama kuralıyla yeniden puanlandı.
+
+| Kol | SCIN Gemma 3 4B | SCIN Qwen 2.5 3B | MedMCQA Gemma | MedMCQA Qwen |
+|---|---|---|---|---|
+| `direct` | 20 / 100 | 10 / 100 | 60 / 100 | 70 / 90 |
+| `structured` | 20 / 100 | 10 / 100 | 60 / 100 | 60 / 90 |
+| `self_refine` | 40 / 100 | 0 / 80 | 60 / 100 | 60 / 90 |
+| `vote3` | 20 / 100 | 10 / 100 | 50 / 100 | 60 / 90 |
+| `vote6` | 20 / 100 | 0 / 90 | 50 / 90 | 60 / 90 |
+| `isolated_refine` | 20 / 100 | 10 / 100 | 50 / 100 | 60 / 80 |
+| `debate` | 20 / 100 | 10 / 100 | 60 / 100 | 70 / 90 |
+| `role_vote` | 10 / 100 | 10 / 90 | 60 / 90 | 60 / 90 |
+| `role_debate` | 10 / 90 | 10 / 100 | 50 / 100 | 70 / 100 |
+| `dermarbiter` | 10 / 90 | 10 / 100 | 70 / 100 | 60 / 100 |
+
+* **Hatalar:** 400 vaka-koşusunun 5'i (%1,25): yukarıdaki 3 tekrar ve 1 kesik çağrı
+  (2 kolda).
+* **Fark testleri:** 20 önceden belirlenmiş karşılaştırmanın hiçbiri anlamlı değil
+  (Holm sonrası hepsi p = 1). En büyük fark MedMCQA Gemma'da
+  `dermarbiter − role_debate` +20 puan (2/0 uyuşmayan vaka). n = 10 ile beklenen.
+* **Maliyet:** `dermarbiter` vaka başına `direct`'in 7 katı çağrı, 13–15 katı token
+  (MedMCQA ~4.400, SCIN ~7.000) ve 7–12 katı süre (123–221 sn) harcıyor.
+* **Varyans ayrıştırması** (10 vaka × 2 model × 10 kol): SCIN'de vaka %64,7, harness'e
+  atfedilebilen toplam %14,5 (harness ana etkisi %0,9, model × harness %2,8).
+  MedMCQA'da vaka %45,0, vaka × model %34,2, harness toplamı %14,0. n = 10 ile
+  yorumlanmıyor; yalnız analiz zincirinin uçtan uca çalıştığını gösteriyor.
+* **Uyuşmazlık oranı:** %7 (bkz. 6. bölüm, örneklem büyüklüğü).
+
+### 7.3 Ana koşular için çıkarımlar
+
+1. **3–4B modeller SCIN'de tabanda.** Bu 10 vakada sabit "Eczema" cevabı %20 alıyor;
+   Gemma `direct` de %20, Qwen %10. Harness farkını görmek için tabanın üstünde bir
+   backbone gerekiyor. Ana koşularda en az 7B (örneğin Qwen 2.5 7B, Gemma 3 12B).
+2. **Şemsiye etiketlere yığılma.** 200 nihai SCIN cevabının 75'i "Acute and chronic
+   dermatitis", 58'i "Acute dermatitis, NOS". Bu iki etiket pilot vakalarında yalnız
+   bir kez doğru. Makalede en sık tahminin payı raporlanacak. Aday listeden bu
+   etiketlerin çıkarılması bir veri kararı; hocayla konuşulmalı, veriye bakılarak
+   tek başına değiştirilmiyor.
+3. **Kesinleştirici pilot.** Backbone değişeceği ve 4 ile 5 numaralı düzeltmeler kodu
+   değiştirdiği için Kaggle'da son backbone'larla aynı 10 vakalık dev pilot tekrar
+   koşulacak; test koşusu ancak ondan sonra.
 
 ## 8. Ana deneyler için hesaplama planı (maliyetsiz)
 
@@ -139,8 +216,9 @@ saat sürer.
   ile açık ağırlıklı iki backbone, örneğin Qwen 2.5 7B ve Gemma 3 12B'nin
   kuantize sürümleri. vLLM OpenAI uyumlu olduğu için mevcut
   `openai_compatible` sağlayıcı değişmeden kullanılıyor.
-* **Paralellik:** runner'a vakaları paralel gönderen bir seçenek eklenecek. vLLM
-  istekleri toplu işlediği için verimi kat kat artırır.
+* **Paralellik:** runner `--workers` ile vakaları paralel gönderiyor; istemler,
+  tohumlar ve kayıt sırası değişmiyor (testle doğrulandı). Kaggle notebook'u
+  (`notebooks/08_text_benchmark_kaggle.ipynb`) bunu kullanıyor.
 * **Örneklem:** test bölmesinden sabit hash sıralı alt küme, örneğin SCIN 600 +
   MedMCQA 400 + MedXpertQA 48, yani model başına ~44 bin çağrı. Bu ölçekte
   saptanabilir fark 6 puan civarı; makalede açıkça yazılacak.
@@ -165,6 +243,6 @@ Takvim [research_decisions_v2_tr.md](research_decisions_v2_tr.md) 7. bölümde.
 | Durum | İş |
 |---|---|
 | Tamam | Pipeline düzeltmeleri, veri builder'ları, 10 kol, istatistik, literatür raporu |
-| Sürüyor | Yerel pilot (planlanan 1–6 Aralık yerine şimdiden) |
-| Sırada | Paralel runner; Kaggle/Colab vLLM kurulumu; veri dondurma ve onay; ana koşular (7–13 Aralık) |
+| Tamam | Yerel pilot (planlanan 1–6 Aralık yerine 22–23 Kasım); paralel runner; Kaggle notebook'u |
+| Sırada | Veri gözden geçirme ve dondurma (insan onayı); Kaggle'da son backbone'larla dev pilot; ana koşular (7–13 Aralık) |
 | Sonra | Görüntü aşaması (2. aşama), guideline-RAG ve heterojen panel kolları (ek analiz) |

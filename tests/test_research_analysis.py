@@ -202,3 +202,28 @@ def test_review_sheet_is_fixed_and_shows_only_visible_text(tmp_path):
     row = outs[0][0]
     assert row["shown_to_model"] == dx_case(row["case_id"])["case_text"]
     assert "*" in row["reference"] and row["text_ok"] == ""
+
+
+def test_reaggregate_rescores_borda_ties_without_calls():
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from reaggregate_runs import reaggregate
+    case = dx_case("c0")
+    panel = [["Psoriasis", "Tinea"], ["Psoriasis", "Tinea"], ["Eczema", "Tinea"]]
+
+    class Panel:
+        name = "fake"
+
+        def __init__(self):
+            self.i = 0
+
+        def complete(self, system, prompt, config, seed):
+            d = panel[self.i % 3]
+            self.i += 1
+            return Completion(json.dumps(dx(*d)), "v1", {"totalTokenCount": 5}, "STOP")
+
+    rec = run_case(case, Config("m", "v1", "vote3"), Panel())
+    assert rec["final"]["answer"] == "Psoriasis"           # current rule breaks the tie
+    stale = {**rec, "status": "abstain", "final": {"differential": [], "answer": None}}
+    assert reaggregate(stale)["final"] == rec["final"] and reaggregate(stale)["status"] == "ok"
+    mcq = {**stale, "task": "mcq"}
+    assert reaggregate(mcq) is mcq

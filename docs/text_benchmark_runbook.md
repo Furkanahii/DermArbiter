@@ -67,7 +67,8 @@ runs refuse non-frozen data.
 | `dermarbiter` | 7 | `role_debate` + moderator makes the scored decision |
 
 Personas are condensed from `dermarbiter/core/prompts/*.txt` (tool instructions
-removed). Ties abstain in every aggregating arm. Pre-specified comparisons:
+removed). MCQ plurality ties abstain. SCIN Borda ties on score are broken by
+first-place votes and abstain only if those tie too. Pre-specified comparisons:
 `debate`–`isolated_refine`, `debate`–`vote6`, `role_vote`–`vote3`,
 `role_debate`–`debate`, `dermarbiter`–`role_debate`, each arm–`direct`.
 
@@ -133,7 +134,8 @@ to `direct` with a case-level paired bootstrap 95% CI and exact McNemar p.
 Re-running the same command skips completed arms.
 
 What to read in the pilot: parse/format error rate per arm, abstention from
-vote ties (role arms with three disagreeing agents abstain), tokens per case
+vote ties (role arms with three disagreeing agents abstain), the share of the most
+frequent prediction (small models collapse onto umbrella labels), tokens per case
 (to price the full run), and whether any arm is clearly broken. Do not tune
 prompts on test, and do not draw conclusions from 20 cases.
 
@@ -246,7 +248,7 @@ python scripts/run_text_benchmark.py score accepted_dev.jsonl \
 
 Scoring requires all planned cases, not just answered cases. Missing IDs count in the denominator; duplicates, unknown IDs, input changes and mixed method/model/repeat configs raise errors. The scoring CLI also checks the exact dataset file hash, including gold and metadata. Evaluate each condition separately. These hashes verify file identity, not the clinical correctness of the answer key.
 
-Errors stop the current case without retry; partial panels do not get a successful final answer. Invalid JSON, extra fields, nonfinite confidence, truncated generations and version mismatch remain visible. Ties abstain. Vote agreement is distinct from probability. Revision counts are descriptive and not a causal estimate. Six calls in each arm do not imply equal total tokens or latency. All runtime calls are serial in this implementation.
+Errors stop the current case without retry; partial panels do not get a successful final answer. Invalid JSON, extra fields, nonfinite confidence, truncated generations and version mismatch remain visible. Unbroken ties abstain. Vote agreement is distinct from probability. Revision counts are descriptive and not a causal estimate. Six calls in each arm do not imply equal total tokens or latency. Calls within a case are serial; `--workers` runs cases concurrently.
 
 ## Offline validation
 

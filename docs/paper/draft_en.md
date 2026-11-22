@@ -161,8 +161,12 @@ are data, not instructions.
 
 - **Personas:** condensed from the DermArbiter system prompts, with tool
   instructions removed.
-- **Aggregation:** plurality for MCQ. For SCIN, Borda count over the ranked
-  differentials (3/2/1 points). A tie for first place abstains.
+- **Aggregation:** plurality for MCQ; a tie abstains. For SCIN, Borda count over
+  the ranked differentials (3/2/1 points). A tie on score for first place is broken
+  by the number of first-place votes; a tie on both abstains. Without this
+  tie-break, a condition that every agent ranked second could tie a 2-of-3 top-1
+  majority (3+3 = 2+2+2), which made the panel abstain in 15 of 26 pilot abstentions
+  (Appendix B).
 - **Seed pairing:** call seeds depend only on the case, the repeat and the call
   index, so the first three calls of vote3, vote6, isolated_refine and debate are
   identical samples. Differences between these arms therefore come from what happens
@@ -175,8 +179,10 @@ are data, not instructions.
 
 Every call must return JSON with three fields:
 
-- **Answer:** an option key (MCQ) or a list of ≤3 distinct candidates (SCIN); an
-  empty list or null means abstain.
+- **Answer:** an option key (MCQ) or a list of ≤3 candidates (SCIN); an empty list
+  or null means abstain. A repeated candidate is dropped, keeping the first
+  occurrence, because grammar-constrained servers do not enforce `uniqueItems`.
+  This never changes the top-1 answer, and the number dropped is logged.
 - **Confidence:** a number in [0, 1]. On abstention it is ignored and stored as null.
 - **Rationale:** at most 1,000 characters.
 
@@ -194,7 +200,10 @@ looping call fails every multi-call arm on that case.
 ### 3.4 Backbones and serving
 
 Two open-weight backbone families, served locally through an OpenAI-compatible
-endpoint (Ollama). [TODO: final choice on dev, e.g. Qwen 2.5 7B and Gemma 3 12B.]
+endpoint (Ollama). In the pilot, 3–4B models scored at the constant-answer
+baseline on SCIN-text (Appendix B), which leaves no room to see harness effects.
+The main runs therefore use backbones of at least 7B. [TODO: final choice on dev,
+e.g. Qwen 2.5 7B and Gemma 3 12B.]
 
 - **Version check:** the returned model string must equal the pinned one.
 - **Hardware:** free GPU notebooks; cases are sent concurrently. The runner's
@@ -232,9 +241,12 @@ an exact McNemar test. Every arm versus direct is reported as a secondary analys
 case × model × harness design. The harness-attributable share is harness +
 model×harness + case×harness.
 
-**Sample size.** With about 20% discordant pairs and α = 0.01 (Holm, five tests), 80%
-power detects about 6 points with 600 SCIN test cases and about 7.6 points with 400
-MedMCQA cases. [TODO: confirm the discordance rate from the dev pilot.]
+**Sample size.** With a discordant-pair rate p and α = 0.01 (Holm, five tests), 80%
+power detects a difference of about 3.42·√(p/n). The dev pilot showed p = 7% over
+the 20 primary comparisons (14 of 200 pairs; 3% on SCIN, 11% on MedMCQA). Small
+backbones near the floor understate disagreement, so we plan with p = 20%: about
+6.2 points with 600 SCIN test cases and 7.6 points with 400 MedMCQA cases (3.7 and
+4.5 points if p stays at 7%).
 
 ## 4. Results
 
@@ -280,7 +292,64 @@ sample of 50 per track) was fixed before review.
 
 ## Appendix B. Pilot failures and fixes
 
-See `docs/study_report_tr.md` §7. [TODO: translate the final pilot table.]
+**Setup.** Two backbones (Gemma 3 4B, Qwen 2.5 3B) × two tracks (SCIN-text, MedMCQA-skin) ×
+10 arms × 10 fixed dev cases, served locally by Ollama on an Apple M2. That is 40
+runs, 400 case-runs and 1,673 calls at about 19 s per call. All runs share one code
+hash and one schema hash. The pilot tests robustness, not accuracy.
+
+**Failures and fixes.** Each fix was made on dev data, before any test run.
+
+| # | Failure | Effect | Fix |
+|---|---|---|---|
+| 1 | Empty `{}` under plain JSON mode | 10/10 invalid in `direct` | Per-case JSON Schema with constrained decoding |
+| 2 | Rationale looped to the token limit | Same case timed out in every multi-call arm | Rationale ≤1,000 characters; recorded timeout |
+| 3 | `confidence: null` with an answer | Answers rejected | Confidence is a required number, ignored on abstention |
+| 4 | Repeated candidate (`["Acne", "Acne"]`) | 3 case-runs failed | Drop repeats, keep order, log count |
+| 5 | Borda score tie (3+3 = 2+2+2) | 15 of 26 abstentions, mostly persona arms | Break ties by first-place votes |
+
+Fixes 1–3 came from a first attempt that was archived; the pilot was restarted
+from scratch. Fixes 4 and 5 came from the pilot reported here.
+
+- **Persona arms:** individual personas rarely abstained (specialist 4.0%,
+  generalist 2.5%, skeptic 4.5% of calls). Before fix 5, persona arms abstained
+  because their more diverse answers tied more often.
+- **Re-scoring:** aggregates never enter a prompt, so fix 5 was applied to the
+  pilot exactly, without new calls (`scripts/reaggregate_runs.py`). Thirteen finals
+  changed from abstention to an answer; none was correct, so top-1 accuracy did not
+  change.
+- **Unexplained failure:** one Gemma call wrote a curly quote inside the rationale,
+  then unrelated text, and the server ended the response without a finish reason.
+  The call is shared by `role_debate` and `dermarbiter` through seed pairing, so it
+  does not bias their comparison.
+- **Failure rate:** 5 of 400 case-runs (1.25%), counted as incorrect.
+
+**Results.** Top-1 accuracy / answer coverage (%), 10 dev cases. SCIN is re-scored
+with the current tie rule.
+
+| Arm | SCIN Gemma | SCIN Qwen | MedMCQA Gemma | MedMCQA Qwen |
+|---|---|---|---|---|
+| direct | 20 / 100 | 10 / 100 | 60 / 100 | 70 / 90 |
+| structured | 20 / 100 | 10 / 100 | 60 / 100 | 60 / 90 |
+| self_refine | 40 / 100 | 0 / 80 | 60 / 100 | 60 / 90 |
+| vote3 | 20 / 100 | 10 / 100 | 50 / 100 | 60 / 90 |
+| vote6 | 20 / 100 | 0 / 90 | 50 / 90 | 60 / 90 |
+| isolated_refine | 20 / 100 | 10 / 100 | 50 / 100 | 60 / 80 |
+| debate | 20 / 100 | 10 / 100 | 60 / 100 | 70 / 90 |
+| role_vote | 10 / 100 | 10 / 90 | 60 / 90 | 60 / 90 |
+| role_debate | 10 / 90 | 10 / 100 | 50 / 100 | 70 / 100 |
+| dermarbiter | 10 / 90 | 10 / 100 | 70 / 100 | 60 / 100 |
+
+- **Primary comparisons:** none of the 20 is significant after Holm correction, as
+  expected with n = 10.
+- **Cost:** `dermarbiter` uses 7× the calls of `direct`, 13–15× the tokens and 7–12×
+  the wall time.
+- **SCIN baseline:** the constant answer "Eczema" scores 20% on these 10 cases, so
+  the small backbones sit at the baseline.
+- **Label collapse:** of 200 SCIN finals, 75 were "Acute and chronic dermatitis"
+  and 58 "Acute dermatitis, NOS". These umbrella labels are the top reference in
+  only one pilot case. We will report the share of the most frequent prediction per
+  arm. [TODO: decide with the clinical co-author whether umbrella labels stay in
+  the candidate list; the decision must be made before the test split is opened.]
 
 ## Reproducibility
 

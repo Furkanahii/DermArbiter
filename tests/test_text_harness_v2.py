@@ -54,18 +54,33 @@ def cfg(method="direct"):
 def test_parse_maps_case_insensitively_to_canonical_candidates():
     out = parse_differential(json.dumps(dx("psoriasis", " ECZEMA ")), CANDS)
     assert out["differential"] == ["Psoriasis", "Eczema"] and out["answer"] == "Psoriasis"
+    assert out["duplicates_dropped"] == 0
+
+
+def test_parse_drops_repeated_conditions_keeping_order():
+    out = parse_differential(json.dumps(dx("Eczema", "Psoriasis", "eczema")), CANDS)
+    assert out["differential"] == ["Eczema", "Psoriasis"] and out["answer"] == "Eczema"
+    assert out["duplicates_dropped"] == 1
 
 
 @pytest.mark.parametrize("value", [
     dx("Melanoma"),                                  # not a candidate
     dx("Eczema", "Tinea", "Psoriasis", "Urticaria"),  # more than three
-    dx("Eczema", "eczema"),                          # duplicate
     {"differential": ["Eczema"], "confidence": None, "rationale": "x"},  # answer w/o confidence
     {"differential": ["Eczema"], "confidence": 0.5},            # missing key
 ])
 def test_parse_rejects_invalid_differentials(value):
     with pytest.raises(ValueError):
         parse_differential(json.dumps(value), CANDS)
+
+
+def test_borda_tie_broken_by_first_place_votes():
+    # pilot case: 2-of-3 top-1 majority tied on score with the condition all ranked second
+    v = borda_vote([dx("Acne", "Tinea"), dx("Acne", "Tinea"), dx("Eczema", "Tinea")])
+    assert v["answer"] == "Acne" and v["differential"][:2] == ["Acne", "Tinea"]
+    assert v["agreement"] == pytest.approx(2 / 3)
+    # equal score and equal first-place votes still abstains
+    assert borda_vote([dx("Eczema", "Tinea"), dx("Tinea", "Eczema")])["answer"] is None
 
 
 def test_borda_ranks_and_ties_abstain():

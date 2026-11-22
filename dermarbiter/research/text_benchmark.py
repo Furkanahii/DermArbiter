@@ -397,7 +397,13 @@ def _check_confidence(answer: Any, confidence: Any) -> Any:
 
 
 def parse_differential(text: str, candidates: list[str]) -> dict:
-    """Strict closed-set parse. Names are matched case-insensitively to candidates."""
+    """Strict closed-set parse. Names are matched case-insensitively to candidates.
+
+    A repeated condition is dropped (first occurrence kept, order preserved) and counted
+    in ``duplicates_dropped``: grammar-constrained servers such as Ollama do not enforce
+    ``uniqueItems``, and in the pilot small models repeated a name in 3 of 420 calls.
+    Dropping never changes the top-1 answer and applies identically to every arm.
+    """
     value = strict_json(text)
     if not isinstance(value, dict) or set(value) != {"differential", "confidence", "rationale"}:
         raise ValueError("Invalid output keys")
@@ -405,20 +411,22 @@ def parse_differential(text: str, candidates: list[str]) -> dict:
     if not isinstance(diff, list) or len(diff) > 3 or any(not isinstance(d, str) for d in diff):
         raise ValueError("Differential must be a list of at most three strings")
     canon = {c.casefold().strip(): c for c in candidates}
-    mapped = []
+    mapped, dropped = [], 0
     for d in diff:
         name = canon.get(d.casefold().strip())
         if name is None:
             raise ValueError("Condition is not a candidate")
         if name in mapped:
-            raise ValueError("Duplicate condition")
+            dropped += 1
+            continue
         mapped.append(name)
     answer = mapped[0] if mapped else None
     confidence = _check_confidence(answer, value["confidence"])
     if not isinstance(value["rationale"], str) or not value["rationale"].strip():
         raise ValueError("Missing rationale")
     return {"differential": mapped, "answer": answer,
-            "confidence": confidence, "rationale": value["rationale"]}
+            "confidence": confidence, "rationale": value["rationale"],
+            "duplicates_dropped": dropped}
 
 
 def _parse_for(case: dict, text: str) -> dict:
@@ -437,22 +445,28 @@ def vote(answers: list[dict]) -> dict:
 
 
 def borda_vote(answers: list[dict]) -> dict:
-    """Rank aggregation for differentials (3/2/1 points). Top-1 ties abstain.
+    """Rank aggregation for differentials (3/2/1 points).
 
-    Lower ranks are ordered by score, then by first appearance in the panel
-    order, which is fixed per arm — never by the gold label.
+    A top-1 tie on Borda score is broken by the number of first-place votes; a tie on
+    both abstains. (Pilot finding: without the tie-break, a condition every agent ranked
+    second tied the 2-of-3 top-1 majority and the panel abstained.) Lower ranks are
+    ordered by score, then first-place votes, then first appearance in the panel order,
+    which is fixed per arm — never by the gold label.
     """
     score: dict[str, int] = {}
+    firsts: dict[str, int] = {}
     first_seen: dict[str, int] = {}
     for a in answers:
         for rank, cond in enumerate(a.get("differential") or []):
             score[cond] = score.get(cond, 0) + (3 - rank)
+            firsts[cond] = firsts.get(cond, 0) + (rank == 0)
             first_seen.setdefault(cond, len(first_seen))
-    ranked = sorted(score, key=lambda c: (-score[c], first_seen[c]))
-    if not ranked or (len(ranked) > 1 and score[ranked[0]] == score[ranked[1]]):
+    key = {c: (score[c], firsts[c]) for c in score}
+    ranked = sorted(score, key=lambda c: (-key[c][0], -key[c][1], first_seen[c]))
+    if not ranked or (len(ranked) > 1 and key[ranked[0]] == key[ranked[1]]):
         return {"differential": [], "answer": None, "confidence": None, "agreement": 0.0}
     winner = ranked[0]
-    agree = sum(1 for a in answers if (a.get("differential") or [None])[0] == winner) / len(answers)
+    agree = firsts[winner] / len(answers)
     return {"differential": ranked[:3], "answer": winner, "confidence": None,
             "agreement": agree}
 

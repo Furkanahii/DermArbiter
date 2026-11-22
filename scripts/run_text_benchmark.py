@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from datetime import datetime, timezone
 import hashlib
@@ -63,6 +64,9 @@ def main(argv=None):
                         "marked publication_eligible=false.")
     p.add_argument("--timeout", type=float, default=120,
                    help="Per-call HTTP timeout in seconds (raise it for slow local hardware)")
+    p.add_argument("--workers", type=int, default=1,
+                   help="Cases run concurrently (for batching servers such as vLLM). "
+                        "Output order and per-call seeds do not depend on it.")
     p.add_argument("--no-json-mode", action="store_true",
                    help="openai_compatible: do not send response_format=json_object")
     args = p.parse_args(argv)
@@ -111,6 +115,8 @@ def main(argv=None):
         print(json.dumps({"returned_model_version": c.model_version, "finish_reason": c.finish_reason,
                           "usage": c.usage, "text_preview": c.text[:300]}, indent=2))
         return
+    if args.workers < 1:
+        p.error("--workers must be positive")
     if not args.output_dir or not args.model or not args.expected_model_version:
         p.error("run requires --output-dir, --model and --expected-model-version")
     if args.max_calls is None or calls > args.max_calls:
@@ -132,16 +138,17 @@ def main(argv=None):
                 "runner_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
                 "status": "started", "provider": provider.name,
                 "base_url": getattr(provider, "base_url", None), "retries": 0,
-                "timeout_seconds": args.timeout,
+                "timeout_seconds": args.timeout, "workers": args.workers,
                 "publication_review_required": True,
                 "limit": args.limit, "dev_pilot": bool(unfrozen),
                 "publication_eligible": not unfrozen}
     manifest_path = args.output_dir / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     records = []
-    with (args.output_dir / "predictions.jsonl").open("x", encoding="utf-8") as out:
-        for case in selected:
-            record = run_case(case, config, provider)
+    with (args.output_dir / "predictions.jsonl").open("x", encoding="utf-8") as out, \
+            ThreadPoolExecutor(max_workers=args.workers) as pool:
+        # Cases are independent; results are written in planned order.
+        for record in pool.map(lambda case: run_case(case, config, provider), selected):
             record["dataset_sha256"] = plan["dataset_sha256"]
             record["publication_eligible"] = not unfrozen
             out.write(json.dumps(record, ensure_ascii=False, allow_nan=False) + "\n")

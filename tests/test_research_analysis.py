@@ -136,3 +136,54 @@ def test_holm_and_prespecified_pairs():
     assert first["delta"] == pytest.approx(1.0) and first["only_arm"] == 8
     assert first["p_holm"] == pytest.approx(min(1.0, 2 * first["p_value"]))
     assert rows[1]["delta"] == 0 and rows[1]["p_holm"] == 1.0
+
+
+def test_workers_do_not_change_predictions(tmp_path):
+    """Concurrent cases give the same records, in the same order, as a serial run."""
+    import hashlib
+    import importlib.util
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            # Deterministic in (seed, prompt): any reordering would show up.
+            h = int(hashlib.sha256(f"{body['seed']}|{body['messages'][1]['content']}".encode())
+                    .hexdigest(), 16)
+            pick = ["Psoriasis", "Eczema", "Tinea"][h % 3]
+            data = json.dumps({"model": "m", "usage": {"total_tokens": 3},
+                               "choices": [{"finish_reason": "stop",
+                                            "message": {"content": json.dumps(dx(pick))}}]})
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(data.encode())
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    spec = importlib.util.spec_from_file_location("rtb", ROOT / "scripts/run_text_benchmark.py")
+    rtb = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(rtb)
+    cases = [{**dx_case(f"c{i}", split="dev"), "text_origin": "patient_reported_structured",
+              "gold_origin": "dermatologist_panel_label", "data_status": "pilot_candidate"}
+             for i in range(8)]
+    path = _write(tmp_path, cases)
+    outs = {}
+    try:
+        for workers in (1, 4):
+            out = tmp_path / f"w{workers}"
+            rtb.main(["run", str(path), "--split", "dev", "--method", "vote3", "--model", "m",
+                      "--expected-model-version", "m", "--max-calls", "24", "--dev-pilot",
+                      "--provider", "openai_compatible",
+                      "--base-url", f"http://127.0.0.1:{server.server_port}/v1",
+                      "--workers", str(workers), "--output-dir", str(out)])
+            recs = [json.loads(l) for l in (out / "predictions.jsonl").read_text().splitlines()]
+            outs[workers] = [(r["case_id"], r["status"], r["final"]) for r in recs]
+            assert json.loads((out / "manifest.json").read_text())["workers"] == workers
+    finally:
+        server.shutdown()
+    assert outs[1] == outs[4] and [c for c, _, _ in outs[1]] == [c["case_id"] for c in cases]

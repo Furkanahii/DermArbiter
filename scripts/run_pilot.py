@@ -60,6 +60,7 @@ def main(argv=None):
     p.add_argument("--token-param", choices=("max_tokens", "max_completion_tokens"))
     p.add_argument("--no-json-mode", action="store_true")
     p.add_argument("--timeout", type=float, default=120)
+    p.add_argument("--workers", type=int, default=1)
     a = p.parse_args(argv)
 
     arms = [x.strip() for x in a.arms.split(",") if x.strip()]
@@ -95,7 +96,7 @@ def main(argv=None):
                    "--max-output-tokens", str(a.max_output_tokens),
                    "--max-calls", str(len(selected) * METHOD_CALLS[arm]),
                    "--output-dir", str(run_dir), "--provider", a.provider,
-                   "--timeout", str(a.timeout)]
+                   "--timeout", str(a.timeout), "--workers", str(a.workers)]
             if a.limit:
                 cmd += ["--limit", str(a.limit)]
             if a.dev_pilot:

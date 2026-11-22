@@ -166,11 +166,52 @@ class DermArenaScorer:
         gold: list[dict[str, Any]],
         predictions: list[dict[str, Any]],
         boundary_results: list[Any] | None = None,
+        *,
+        strict: bool = True,
     ) -> None:
+        """
+        Args:
+            gold: Frozen gold cases. Their case_ids define the evaluation
+                universe.
+            predictions: One record per answered case.
+            boundary_results: Optional Dimension-9 probe results.
+            strict: When True (default) every gold case is scored: a
+                missing prediction counts as a wrong/empty answer instead of
+                silently leaving the denominator, and duplicate or unknown
+                prediction ids raise ``ValueError``. ``strict=False``
+                restores the legacy inner join (answered cases only), which
+                is only appropriate as a secondary "accuracy on completed"
+                view and must not be reported as the primary result.
+        """
+        gold_ids = [g["case_id"] for g in gold]
+        if len(set(gold_ids)) != len(gold_ids):
+            dup = sorted({c for c in gold_ids if gold_ids.count(c) > 1})
+            raise ValueError(f"Duplicate gold case_id(s): {dup[:5]}")
         self._gold = {g["case_id"]: g for g in gold}
-        self._pred = {p["case_id"]: p for p in predictions}
-        # Only score cases present in BOTH streams (inner join).
-        self._ids = [cid for cid in self._gold if cid in self._pred]
+
+        pred: dict[str, dict[str, Any]] = {}
+        for rec in predictions:
+            cid = rec["case_id"]
+            if cid in pred:
+                if strict:
+                    raise ValueError(f"Duplicate prediction for case_id {cid!r}")
+                continue
+            if cid not in self._gold:
+                if strict:
+                    raise ValueError(f"Prediction for unknown case_id {cid!r}")
+                continue
+            pred[cid] = rec
+        self._completed_ids = [cid for cid in gold_ids if cid in pred]
+        self._missing_ids = [cid for cid in gold_ids if cid not in pred]
+        if strict:
+            # Missing answers stay in the denominator as empty predictions.
+            for cid in self._missing_ids:
+                pred[cid] = {"case_id": cid, "status": "missing"}
+            self._ids = list(gold_ids)
+        else:
+            self._ids = list(self._completed_ids)
+        self._pred = pred
+        self._strict = strict
         self._boundary_results = boundary_results
 
     # ── Constructors ────────────────────────────────────────────────────
@@ -220,6 +261,14 @@ class DermArenaScorer:
     @property
     def n_cases(self) -> int:
         return len(self._ids)
+
+    @property
+    def n_missing(self) -> int:
+        return len(self._missing_ids)
+
+    @property
+    def completion_rate(self) -> float:
+        return len(self._completed_ids) / len(self._gold) if self._gold else 0.0
 
     def _gt(self, cid: str) -> dict[str, Any]:
         return self._gold[cid].get("ground_truth", {})
@@ -327,10 +376,10 @@ class DermArenaScorer:
     def calibration(self, n_bins: int = 10) -> float:
         """Expected Calibration Error between consensus_score (confidence)
         and top-1 correctness. Lower is better; returned as raw ECE."""
-        if not self._ids:
+        if not self._completed_ids:
             return 0.0
         confs, accs = [], []
-        for cid in self._ids:
+        for cid in self._completed_ids:
             gt = normalize_to_class(self._gt(cid).get("diagnosis_label", ""))
             p = self._pred[cid]
             pred1 = normalize_to_class(p.get("predicted_label", ""))
@@ -473,6 +522,10 @@ class DermArenaScorer:
 
         return {
             "n_cases": self.n_cases,
+            "n_completed": len(self._completed_ids),
+            "n_missing": self.n_missing,
+            "completion_rate": round(self.completion_rate, 4),
+            "denominator": "all_gold_cases" if self._strict else "completed_only",
             "composite": round(composite, 4),
             "dimensions": {k: (round(v, 4) if v is not None else None)
                            for k, v in per_dim.items()},
@@ -493,6 +546,9 @@ class DermArenaScorer:
         r = self.score_all()
         print("\n" + "=" * 60)
         print(f" DermArena Report — {r['n_cases']} cases")
+        if r.get("n_cases"):
+            print(f" Completed: {r['n_completed']} · Missing: {r['n_missing']} "
+                  f"· Denominator: {r['denominator']}")
         print("=" * 60)
         names = {
             "1_visual_diagnosis": "Görsel Tanı (top-1)",

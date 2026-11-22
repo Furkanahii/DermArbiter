@@ -239,7 +239,7 @@ class _MockAgent:
         return tool_map.get(self._role, [])
 
     # Phase 2
-    def generate_brief(self, evidence_cards: list) -> Any:
+    def generate_brief(self, evidence_cards: list, case_context: str | None = None) -> Any:
         from dermarbiter.core.blackboard import AgentBrief
         tmpl = _MockModelRouter._BRIEF_TEMPLATES.get(
             self._role, _MockModelRouter._BRIEF_TEMPLATES["generalist"]
@@ -247,7 +247,7 @@ class _MockAgent:
         return AgentBrief(agent_role=self._role, **tmpl)
 
     # Phase 4
-    def generate_argument(self, topic: str, opponent_brief: Any) -> str:
+    def generate_argument(self, topic: str, opponent_brief: Any, case_context: str | None = None) -> str:
         return (
             f"[{self._role.upper()}] Regarding '{topic[:80]}': "
             f"I maintain my position based on the evidence. "

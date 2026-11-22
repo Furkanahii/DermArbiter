@@ -83,6 +83,7 @@ debate:
   max_rounds: 3                     # Max argument/rebuttal rounds
   token_budget_per_turn: 100        # Max tokens per debate turn
   global_token_budget: 50000        # Total token budget for full pipeline
+  revise_after_debate: true         # Agents revise briefs after debate (debate can change final dx)
 
   # --- Phase 3: Early Exit Gating ---
   early_exit:

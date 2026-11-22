@@ -81,6 +81,7 @@ class SpecialistAgent(BaseAgent):
     def generate_brief(
         self,
         evidence_cards: list[EvidenceCard],
+        case_context: str | None = None,
     ) -> AgentBrief:
         """
         Synthesize evidence cards into a specialist-grade diagnostic brief.
@@ -103,6 +104,7 @@ class SpecialistAgent(BaseAgent):
             "agent in a multi-expert diagnostic panel.\n\n"
             "Review the following evidence cards carefully and produce a "
             "structured diagnostic opinion.\n\n"
+            f"{self._build_case_block(case_context)}"
             f"{evidence_context}\n\n"
             "Respond with ONLY a JSON object in this exact schema:\n"
             "```json\n"
@@ -178,6 +180,7 @@ class SpecialistAgent(BaseAgent):
         self,
         topic: str,
         opponent_brief: AgentBrief,
+        case_context: str | None = None,
     ) -> str:
         """
         Generate an authoritative, evidence-based rebuttal.
@@ -198,6 +201,7 @@ class SpecialistAgent(BaseAgent):
         prompt = (
             "You are the SPECIALIST dermatologist in a structured diagnostic "
             "debate.  Provide an authoritative, evidence-based rebuttal.\n\n"
+            f"{self._build_case_block(case_context)}"
             f"DEBATE TOPIC: {topic}\n\n"
             f"OPPONENT ({opponent_brief.agent_role}) POSITION:\n"
             f"  Differential: {opponent_dx}\n"

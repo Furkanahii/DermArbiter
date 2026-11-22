@@ -237,12 +237,37 @@ class TestScorerEdges:
         assert r["n_cases"] == 0
         assert r["composite"] == 0.0
 
-    def test_inner_join_only(self):
+    def test_missing_predictions_stay_in_denominator(self):
         gold = bdb.build_synthetic(7, seed=3)
         # predictions for only 3 of 7 cases
         preds = _perfect_predictions(gold)[:3]
         sc = DermArenaScorer(gold, preds)
+        assert sc.n_cases == 7
+        assert sc.n_missing == 4
+        assert sc.completion_rate == pytest.approx(3 / 7)
+        # 3 perfect answers out of 7 planned cases, not 3/3.
+        assert sc.visual_diagnosis()["top1"] == pytest.approx(3 / 7)
+        report = sc.score_all()
+        assert report["denominator"] == "all_gold_cases"
+        assert report["n_missing"] == 4
+
+    def test_legacy_inner_join_is_opt_in(self):
+        gold = bdb.build_synthetic(7, seed=3)
+        preds = _perfect_predictions(gold)[:3]
+        sc = DermArenaScorer(gold, preds, strict=False)
         assert sc.n_cases == 3
+        assert sc.visual_diagnosis()["top1"] == 1.0
+        assert sc.score_all()["denominator"] == "completed_only"
+
+    def test_duplicate_or_unknown_predictions_raise(self):
+        gold = bdb.build_synthetic(3, seed=4)
+        preds = _perfect_predictions(gold)
+        with pytest.raises(ValueError, match="Duplicate prediction"):
+            DermArenaScorer(gold, preds + [dict(preds[0])])
+        with pytest.raises(ValueError, match="unknown case_id"):
+            DermArenaScorer(gold, preds + [{**preds[0], "case_id": "NOPE"}])
+        with pytest.raises(ValueError, match="Duplicate gold"):
+            DermArenaScorer(gold + [gold[0]], preds)
 
     def test_grounding_zero_for_pure_llm(self):
         # A baseline with no cited_cards → grounding 0 (by construction).

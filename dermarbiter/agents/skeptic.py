@@ -79,6 +79,7 @@ class SkepticAgent(BaseAgent):
     def generate_brief(
         self,
         evidence_cards: list[EvidenceCard],
+        case_context: str | None = None,
     ) -> AgentBrief:
         """
         Critically review evidence and produce a skeptic's diagnostic brief.
@@ -110,6 +111,7 @@ class SkepticAgent(BaseAgent):
             "- Challenge overconfident conclusions.\n"
             "- Consider alternative diagnoses that share similar features.\n"
             "- Note any anchoring bias (over-reliance on a single tool).\n\n"
+            f"{self._build_case_block(case_context)}"
             f"{evidence_context}\n\n"
             "Respond with ONLY a JSON object in this exact schema:\n"
             "```json\n"
@@ -198,6 +200,7 @@ class SkepticAgent(BaseAgent):
         self,
         topic: str,
         opponent_brief: AgentBrief,
+        case_context: str | None = None,
     ) -> str:
         """
         Generate an aggressive, evidence-probing rebuttal.
@@ -246,6 +249,7 @@ class SkepticAgent(BaseAgent):
             "You are the SKEPTIC in a structured diagnostic debate.  Your "
             "role is to be the most rigorous critic on the panel.  Challenge "
             "every weak point aggressively but fairly.\n\n"
+            f"{self._build_case_block(case_context)}"
             f"DEBATE TOPIC: {topic}\n\n"
             f"OPPONENT ({opponent_brief.agent_role}) POSITION:\n"
             f"  Differential: {opponent_dx}\n"

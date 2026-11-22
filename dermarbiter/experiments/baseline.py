@@ -125,12 +125,7 @@ class BaselineRunner:
         Returns:
             A result dict matching the standard experiment JSONL schema.
         """
-        initial_state = BlackboardState(
-            case_id=case.get("case_id", "UNKNOWN"),
-            query=case.get("query", ""),
-            image_path=case.get("image_path"),
-            patient_context=case.get("patient_context", {}),
-        )
+        initial_state = BlackboardState.from_case(case)
 
         t0 = time.monotonic()
         try:

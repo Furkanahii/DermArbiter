@@ -137,7 +137,7 @@ def test_vote_agreement_is_not_confidence_and_tie_abstains():
     '{"answer":"A","confidence":NaN,"rationale":"x"}',
     '{"answer":"C","confidence":0.5,"rationale":"x"}',
     '{"answer":"A","confidence":true,"rationale":"x"}',
-    '{"answer":null,"confidence":0.5,"rationale":"x"}',
+    '{"answer":"A","confidence":null,"rationale":"x"}',
     '```json\n{}\n```',
 ])
 def test_invalid_model_json_is_not_repaired_silently(raw):

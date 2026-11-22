@@ -79,6 +79,24 @@ removed). Ties abstain in every aggregating arm. Pre-specified comparisons:
   (`vllm serve Qwen/Qwen3-8B` → `--base-url http://localhost:8000/v1`).
   Key from `OPENAI_API_KEY` or `--api-key-env NAME`; none needed for local servers.
 
+### Output format (same for every arm)
+
+OpenAI-compatible servers get a per-case JSON Schema (`response_format:
+json_schema`, strict): the answer is an enum of option keys (MCQ) or of the
+case's candidate conditions (dx, at most 3), `confidence` is a required number
+in [0, 1] (ignored and stored as null on abstention), and `rationale` is capped
+at 1000 characters. Each cap was added after a local pilot failure:
+
+* plain `json_object` mode: Gemma 3 4B returned `{}` (10/10 invalid in `direct`);
+* `confidence` nullable: Qwen 2.5 3B answered with `confidence: null`;
+* no rationale cap: Gemma looped inside the rationale until `max_output_tokens`
+  and hit the HTTP timeout (one SCIN case, every multi-call arm).
+
+The parser stays strict for providers that ignore the schema. The schema hash
+is stored per call (`response_schema_sha256`). `--timeout` sets the per-call
+HTTP timeout (default 120 s; it is recorded in the manifest). There are no
+retries.
+
 `--expected-model-version` must equal the version string the provider returns
 (Gemini `modelVersion`, OpenAI `model`); a mismatch is recorded as an error.
 
@@ -121,8 +139,21 @@ prompts on test, and do not draw conclusions from 20 cases.
 
 Offline check (22 Nov): a local stub server answering "Eczema" to every case
 scored exactly the dev constant baseline (25.9%) through `direct` and
-`dermarbiter`, confirming builder → runner → provider → scorer wiring. No live
-model has been run yet.
+`dermarbiter`, confirming builder → runner → provider → scorer wiring.
+
+Local, zero-cost pilot (22 Nov): Ollama on an Apple M2 (16 GB), `gemma3:4b`
+and `qwen2.5:3b`, 10 dev cases per track, all arms:
+
+```bash
+ollama pull gemma3:4b && ollama pull qwen2.5:3b
+python scripts/run_pilot.py data/text_benchmark/scin_text_k30.jsonl --split dev --limit 10 --dev-pilot \
+    --provider openai_compatible --base-url http://127.0.0.1:11434/v1 \
+    --model gemma3:4b --expected-model-version gemma3:4b --timeout 300 --out runs/local_pilot/scin_text_k30
+python scripts/analyze_runs.py data/text_benchmark/scin_text_k30.jsonl --split dev --limit 10 \
+    --runs runs/local_pilot/scin_text_k30/*/* --out runs/local_pilot/scin_text_k30/analysis
+```
+
+About 20 s per call for a 4B model on this machine; one track is 420 calls.
 
 ---
 

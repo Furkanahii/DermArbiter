@@ -24,12 +24,13 @@ def read_jsonl(path):
 
 def _provider(args, p):
     if args.provider == "gemini":
-        return GeminiProvider(os.environ.get(args.api_key_env or "GEMINI_API_KEY", ""))
+        return GeminiProvider(os.environ.get(args.api_key_env or "GEMINI_API_KEY", ""),
+                              timeout=args.timeout)
     if not args.base_url:
         p.error("openai_compatible requires --base-url")
     return OpenAICompatibleProvider(
         args.base_url, os.environ.get(args.api_key_env or "OPENAI_API_KEY", ""),
-        json_mode=not args.no_json_mode, token_param=args.token_param)
+        timeout=args.timeout, json_mode=not args.no_json_mode, token_param=args.token_param)
 
 
 def main(argv=None):
@@ -60,6 +61,8 @@ def main(argv=None):
     p.add_argument("--dev-pilot", action="store_true",
                    help="Allow pilot_candidate data on the dev split only. Runs are "
                         "marked publication_eligible=false.")
+    p.add_argument("--timeout", type=float, default=120,
+                   help="Per-call HTTP timeout in seconds (raise it for slow local hardware)")
     p.add_argument("--no-json-mode", action="store_true",
                    help="openai_compatible: do not send response_format=json_object")
     args = p.parse_args(argv)
@@ -129,6 +132,7 @@ def main(argv=None):
                 "runner_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
                 "status": "started", "provider": provider.name,
                 "base_url": getattr(provider, "base_url", None), "retries": 0,
+                "timeout_seconds": args.timeout,
                 "publication_review_required": True,
                 "limit": args.limit, "dev_pilot": bool(unfrozen),
                 "publication_eligible": not unfrozen}

@@ -60,7 +60,7 @@ def test_parse_maps_case_insensitively_to_canonical_candidates():
     dx("Melanoma"),                                  # not a candidate
     dx("Eczema", "Tinea", "Psoriasis", "Urticaria"),  # more than three
     dx("Eczema", "eczema"),                          # duplicate
-    {"differential": [], "confidence": 0.5, "rationale": "x"},  # abstain with confidence
+    {"differential": ["Eczema"], "confidence": None, "rationale": "x"},  # answer w/o confidence
     {"differential": ["Eczema"], "confidence": 0.5},            # missing key
 ])
 def test_parse_rejects_invalid_differentials(value):
@@ -282,6 +282,7 @@ def test_response_schema_mcq_and_plain_json_fallback(monkeypatch):
     sch = response_schema(mcq)
     assert sch["properties"]["answer"]["enum"] == ["A", "B", None]
     assert sch["properties"]["confidence"]["maximum"] == 1
+    assert sch["properties"]["rationale"]["maxLength"] == 1000   # bounds runaway loops
     seen = {}
 
     class R:
@@ -299,3 +300,18 @@ def test_response_schema_mcq_and_plain_json_fallback(monkeypatch):
     assert seen["body"]["response_format"] == {"type": "json_object"}   # no schema given
     OpenAICompatibleProvider("http://x/v1", json_mode=False).complete("s", "p", Config("m", "v1"), 0, schema=sch)
     assert "response_format" not in seen["body"]
+
+
+def test_confidence_required_when_answering_and_ignored_on_abstention():
+    from dermarbiter.research.text_benchmark import parse_differential, response_schema
+    cands = ["Eczema", "Tinea"]
+    with pytest.raises(ValueError, match="Missing confidence"):
+        parse_differential(json.dumps({"differential": ["Eczema"], "confidence": None,
+                                       "rationale": "r"}), cands)
+    for conf in (None, 0, 0.4):
+        v = parse_differential(json.dumps({"differential": [], "confidence": conf,
+                                           "rationale": "r"}), cands)
+        assert v["answer"] is None and v["confidence"] is None
+    with pytest.raises(ValueError, match="Invalid confidence"):
+        parse_differential(json.dumps({"differential": [], "confidence": 2, "rationale": "r"}), cands)
+    assert response_schema(dx_case())["properties"]["confidence"]["type"] == "number"

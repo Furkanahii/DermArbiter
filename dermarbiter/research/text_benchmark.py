@@ -50,15 +50,15 @@ _COMMON = ("You are answering a dermatology research benchmark item, not treatin
            "Use only the provided case and your knowledge. Do not invent observations. ")
 SYSTEM = _COMMON + (
     'Return only a JSON object with answer (one option key, or null to abstain), '
-    'confidence (number from 0 to 1 for your selected answer, or null if abstaining), '
+    'confidence (number from 0 to 1 for your selected answer; use 0 if abstaining), '
     'and rationale (a concise explanation, at most 120 words).'
 )
 DX_SYSTEM = _COMMON + (
     "The case is a patient's own structured self-report without images. "
     "Return only a JSON object with differential (a list of 1 to 3 distinct conditions "
     "copied exactly from candidate_conditions, most likely first, or an empty list to "
-    "abstain), confidence (number from 0 to 1 that your first condition is correct, or "
-    "null if abstaining), and rationale (a concise explanation, at most 120 words)."
+    "abstain), confidence (number from 0 to 1 that your first condition is correct; "
+    "use 0 if abstaining), and rationale (a concise explanation, at most 120 words)."
 )
 TASK_SYSTEM = {"mcq": SYSTEM, "dx": DX_SYSTEM}
 
@@ -339,14 +339,21 @@ class OpenAICompatibleProvider:
                           data.get("id"))
 
 
+# ~120 words. Bounds runaway generation under constrained decoding (a looping
+# rationale otherwise runs to max_output_tokens and times out on slow hardware).
+RATIONALE_MAX_CHARS = 1000
+
+
 def response_schema(case: dict) -> dict:
     """JSON Schema of the only valid answer for this case (used for constrained decoding).
 
     Same schema for every arm, so constrained decoding never favours an arm.
     Parsing stays strict regardless: providers that ignore the schema are still checked.
     """
-    conf = {"type": ["number", "null"], "minimum": 0, "maximum": 1}
-    rationale = {"type": "string"}
+    # Always a number: small models otherwise answer with confidence=null (invalid).
+    # Ignored on abstention (see _check_confidence).
+    conf = {"type": "number", "minimum": 0, "maximum": 1}
+    rationale = {"type": "string", "minLength": 1, "maxLength": RATIONALE_MAX_CHARS}
     if task_of(case) == "mcq":
         answer = {"type": ["string", "null"], "enum": [*sorted(case["options"]), None]}
         props, req = {"answer": answer}, ["answer"]
@@ -366,19 +373,27 @@ def parse_answer(text: str, options: dict) -> dict:
     answer, confidence = value["answer"], value["confidence"]
     if answer is not None and (not isinstance(answer, str) or answer not in options):
         raise ValueError("Answer is not an option key")
-    _check_confidence(answer, confidence)
+    value = {**value, "confidence": _check_confidence(answer, confidence)}
     if not isinstance(value["rationale"], str) or not value["rationale"].strip():
         raise ValueError("Missing rationale")
     return value
 
 
-def _check_confidence(answer: Any, confidence: Any) -> None:
-    if answer is None:
-        if confidence is not None:
-            raise ValueError("Abstention confidence must be null")
-    elif (type(confidence) not in (int, float) or not math.isfinite(confidence)
-          or not 0 <= confidence <= 1):
+def _check_confidence(answer: Any, confidence: Any) -> Any:
+    """Validate confidence; return it normalized (None when abstaining).
+
+    An abstention may carry null or any in-range number (the constrained-decoding
+    schema always forces a number); it is stored as None either way.
+    """
+    if confidence is not None and (type(confidence) not in (int, float)
+                                   or not math.isfinite(confidence)
+                                   or not 0 <= confidence <= 1):
         raise ValueError("Invalid confidence")
+    if answer is None:
+        return None
+    if confidence is None:
+        raise ValueError("Missing confidence")
+    return confidence
 
 
 def parse_differential(text: str, candidates: list[str]) -> dict:
@@ -399,11 +414,11 @@ def parse_differential(text: str, candidates: list[str]) -> dict:
             raise ValueError("Duplicate condition")
         mapped.append(name)
     answer = mapped[0] if mapped else None
-    _check_confidence(answer, value["confidence"])
+    confidence = _check_confidence(answer, value["confidence"])
     if not isinstance(value["rationale"], str) or not value["rationale"].strip():
         raise ValueError("Missing rationale")
     return {"differential": mapped, "answer": answer,
-            "confidence": value["confidence"], "rationale": value["rationale"]}
+            "confidence": confidence, "rationale": value["rationale"]}
 
 
 def _parse_for(case: dict, text: str) -> dict:

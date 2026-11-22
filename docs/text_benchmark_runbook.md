@@ -1,4 +1,106 @@
-# Text MCQ pilot: implementation and reproduction
+# Text-only harness benchmark: runbook
+
+`dermarbiter/research/text_benchmark.py` runs every harness arm on identical
+text input, with fixed call budgets, a locked model version, no retries, no
+fallback, no tools and no images. Two task types share the runner.
+
+## Tracks (built 22 Nov 2026)
+
+| Track | Builder | Schema | Cases (dev / test) | Gold | Answer-blind baseline (test) |
+|---|---|---|---|---|---|
+| A — SCIN self-report | `scin` | `text-dx-v1` (rank ≤3 of 30 candidates) | 2,154 (417 / 1,737) | dermatologist weighted labels | constant "Eczema" 25.5%, random 4.4% |
+| B — MedMCQA Skin (train) | `medmcqa` | `text-mcq-pilot-v1` (A–D) | 1,269 (257 / 1,012) | published key | constant 27.1%, random 25% |
+| B — MedXpertQA Integumentary | `medxpertqa` | `text-mcq-pilot-v1` (A–J) | 48 (test only) | published key | constant 20.8%, random 10% |
+
+Provenance (source hashes, exclusions, vocabulary, baselines) is tracked in
+`data/text_benchmark/*.report.json`. The JSONL files are rebuilt locally and
+not committed (source licenses differ).
+
+Design choices to report in the paper:
+
+* **SCIN** labels were assigned by dermatologists from images; text-only accuracy
+  has a low ceiling by design. Top-1 counts as correct if it matches any tied
+  highest-weight label (925 of 3,061 labeled cases have tied top labels);
+  `top1_soft` gives that label's weight. Vocabulary = 30 most frequent top labels.
+  Self-reports are templated from form fields; race is kept in metadata only.
+* **MedMCQA** options are shuffled per question (seeded) because the published
+  key is skewed (~35–40% "A"). Train split ⇒ contamination is possible.
+* Splits are hash-based and grouped by normalized visible text, so identical
+  inputs never cross dev/test. Use dev for prompt freezing, test once.
+
+### Build
+
+```bash
+# SCIN metadata (no images): https://github.com/google-research-datasets/scin
+curl -O https://storage.googleapis.com/dx-scin-public-data/dataset/scin_cases.csv
+curl -O https://storage.googleapis.com/dx-scin-public-data/dataset/scin_labels.csv
+python scripts/build_text_benchmark.py scin --cases scin_cases.csv --labels scin_labels.csv \
+    --output data/text_benchmark/scin_text_k30.jsonl
+
+# MedMCQA (Apache-2.0), pinned revision
+curl -L -o medmcqa_train.parquet https://huggingface.co/datasets/openlifescienceai/medmcqa/resolve/91c6572c454088bf71b679ad90aa8dffcd0d5868/data/train-00000-of-00001.parquet
+python scripts/build_text_benchmark.py medmcqa --parquet medmcqa_train.parquet \
+    --revision 91c6572c454088bf71b679ad90aa8dffcd0d5868 --output data/text_benchmark/medmcqa_skin.jsonl
+
+# MedXpertQA (MIT), pinned revision
+curl -L -o medxpertqa_text_test.jsonl https://huggingface.co/datasets/TsinghuaC3I/MedXpertQA/resolve/7e7c465a68eb2b866926bfa59c8c9d17a8daba65/Text/test.jsonl
+python scripts/build_text_benchmark.py medxpertqa --jsonl medxpertqa_text_test.jsonl \
+    --revision 7e7c465a68eb2b866926bfa59c8c9d17a8daba65 --output data/text_benchmark/medxpertqa_derm.jsonl
+```
+
+Compare the printed `output_sha256` with the tracked report. After the team has
+reviewed a build, rebuild with `--data-status frozen --accepted-by NAME`; live
+runs refuse non-frozen data.
+
+## Harness arms
+
+| Arm | Calls | What it isolates |
+|---|---:|---|
+| `direct` | 1 | raw backbone |
+| `structured` | 1 | prompt structure |
+| `self_refine` | 3 | extra compute, same agent |
+| `vote3` / `vote6` | 3 / 6 | sampling only (plurality / Borda) |
+| `isolated_refine` | 6 | debate topology without peer information |
+| `debate` | 6 | homogeneous peer communication |
+| `role_vote` | 3 | DermArbiter personas (specialist / generalist / skeptic), no communication |
+| `role_debate` | 6 | personas + one simultaneous revision round seeing named peers |
+| `dermarbiter` | 7 | `role_debate` + moderator makes the scored decision |
+
+Personas are condensed from `dermarbiter/core/prompts/*.txt` (tool instructions
+removed). Ties abstain in every aggregating arm. Pre-specified comparisons:
+`debate`–`isolated_refine`, `debate`–`vote6`, `role_vote`–`vote3`,
+`role_debate`–`debate`, `dermarbiter`–`role_debate`, each arm–`direct`.
+
+## Providers
+
+* `--provider gemini` — Gemini REST, key from `GEMINI_API_KEY`.
+* `--provider openai_compatible --base-url URL` — OpenAI or any compatible
+  server, e.g. vLLM on Colab for open-weight backbones
+  (`vllm serve Qwen/Qwen3-8B` → `--base-url http://localhost:8000/v1`).
+  Key from `OPENAI_API_KEY` or `--api-key-env NAME`; none needed for local servers.
+
+`--expected-model-version` must equal the version string the provider returns
+(Gemini `modelVersion`, OpenAI `model`); a mismatch is recorded as an error.
+
+```bash
+python scripts/run_text_benchmark.py plan data/text_benchmark/scin_text_k30.jsonl --split dev --method dermarbiter
+python scripts/run_text_benchmark.py run  data/text_benchmark/scin_text_k30.jsonl --split dev --method dermarbiter \
+    --provider openai_compatible --base-url http://localhost:8000/v1 \
+    --model Qwen/Qwen3-8B --expected-model-version Qwen/Qwen3-8B \
+    --max-calls 2919 --output-dir runs/scin_dev/qwen3-8b/dermarbiter_r0
+python scripts/run_text_benchmark.py score data/text_benchmark/scin_text_k30.jsonl --split dev \
+    --predictions runs/scin_dev/qwen3-8b/dermarbiter_r0/predictions.jsonl
+```
+
+Offline check (22 Nov): a local stub server answering "Eczema" to every case
+scored exactly the dev constant baseline (25.9%) through `direct` and
+`dermarbiter`, confirming builder → runner → provider → scorer wiring. No live
+model has been run yet.
+
+---
+
+# Appendix: original MCQ pilot notes (21 Nov)
+
 
 This pilot is separate from the legacy mock orchestrators. It supports seven conditions in `dermarbiter/research/text_benchmark.py`. It does not yet implement RAG, open-ended clinical scoring, paired statistical intervals, a second API provider, or a dollar budget cap. No live provider call was made during development.
 

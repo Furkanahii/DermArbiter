@@ -1,4 +1,4 @@
-"""Plan, run or score the isolated MCQ pilot. Planning never calls a model."""
+"""Plan, run or score a text-only harness arm (MCQ or closed-set dx). Planning never calls a model."""
 from __future__ import annotations
 
 import argparse
@@ -12,8 +12,8 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from dermarbiter.research.text_benchmark import (  # noqa: E402
-    Config, GeminiProvider, METHOD_CALLS, VERSION, digest, evaluate,
-    run_case, strict_json, validate_cases,
+    Config, GeminiProvider, METHOD_CALLS, OpenAICompatibleProvider, digest, evaluate,
+    run_case, strict_json, task_of, validate_cases,
 )
 
 
@@ -36,6 +36,15 @@ def main():
     p.add_argument("--max-calls", type=int)
     p.add_argument("--output-dir", type=Path)
     p.add_argument("--predictions", type=Path)
+    p.add_argument("--provider", choices=("gemini", "openai_compatible"), default="gemini")
+    p.add_argument("--base-url", help="openai_compatible: e.g. https://api.openai.com/v1 "
+                   "or http://localhost:8000/v1 for vLLM")
+    p.add_argument("--api-key-env", help="Name of the env var holding the API key "
+                   "(default GEMINI_API_KEY / OPENAI_API_KEY). Keys are never passed as arguments.")
+    p.add_argument("--token-param", choices=("max_tokens", "max_completion_tokens"),
+                   default="max_tokens")
+    p.add_argument("--no-json-mode", action="store_true",
+                   help="openai_compatible: do not send response_format=json_object")
     args = p.parse_args()
     cases = read_jsonl(args.dataset)
     validate_cases(cases)  # cross-split checks precede selection
@@ -52,7 +61,8 @@ def main():
         print(json.dumps(evaluate(selected, predictions), indent=2))
         return
     calls = len(selected) * METHOD_CALLS[args.method]
-    plan = {"schema_version": VERSION, "method": args.method, "split": args.split,
+    plan = {"schema_version": selected[0]["schema_version"], "task": task_of(selected[0]),
+            "method": args.method, "split": args.split,
             "n_cases": len(selected), "maximum_calls": calls,
             "nominal_output_token_allowance": calls * args.max_output_tokens,
             "budget_note": "Not a dollar cap or matched total-token budget; input/thinking usage varies.",
@@ -71,14 +81,22 @@ def main():
         p.error("Data acceptance review is pending: live runs require data_status=frozen")
     config = Config(args.model, args.expected_model_version, args.method,
                     args.temperature, args.max_output_tokens, args.seed, args.repeat)
-    provider = GeminiProvider(os.environ.get("GEMINI_API_KEY", ""))
+    if args.provider == "gemini":
+        provider = GeminiProvider(os.environ.get(args.api_key_env or "GEMINI_API_KEY", ""))
+    else:
+        if not args.base_url:
+            p.error("openai_compatible requires --base-url")
+        provider = OpenAICompatibleProvider(
+            args.base_url, os.environ.get(args.api_key_env or "OPENAI_API_KEY", ""),
+            json_mode=not args.no_json_mode, token_param=args.token_param)
     args.output_dir.mkdir(parents=True, exist_ok=False)
     module_path = Path(__file__).resolve().parents[1] / "dermarbiter/research/text_benchmark.py"
     manifest = {**plan, "config": asdict(config), "config_sha256": digest(asdict(config)),
                 "started_at": datetime.now(timezone.utc).isoformat(),
                 "code_sha256": hashlib.sha256(module_path.read_bytes()).hexdigest(),
                 "runner_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-                "status": "started", "provider": "gemini_rest", "retries": 0,
+                "status": "started", "provider": provider.name,
+                "base_url": getattr(provider, "base_url", None), "retries": 0,
                 "publication_review_required": True}
     manifest_path = args.output_dir / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")

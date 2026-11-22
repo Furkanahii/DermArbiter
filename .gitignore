@@ -94,3 +94,7 @@ results/
 # Model cache
 .cache/
 huggingface/
+
+# Text benchmark builds: rebuild locally with scripts/build_text_benchmark.py
+# (source licenses differ; only provenance reports are tracked)
+data/text_benchmark/*.jsonl

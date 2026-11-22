@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import math
 import random
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -84,6 +85,9 @@ def summarize(cases: list[dict], runs: list[dict], reference: str | None = "dire
             "tokens_per_case": (sum(tokens) / len(tokens)) if tokens else None,
             "tokens_complete": len(tokens) == len(recs) and bool(recs),
             "latency_per_case_s": (sum(r["latency_seconds"] for r in recs) / len(recs)) if recs else None,
+            "error_codes": dict(Counter(t["error_code"] for r in recs for t in r.get("trace", [])
+                                        if t.get("error_code"))),
+            "abstentions": metrics["n_abstain"],
             "publication_eligible": bool(run["manifest"].get("publication_eligible", False)),
             "run_dir": run["dir"],
         }
@@ -134,6 +138,10 @@ def to_markdown(rows: list[dict[str, Any]], reference: str | None = "direct") ->
             else:
                 cells += ["ref" if r["arm"] == reference else "–", ""]
         lines.append("| " + " | ".join(cells) + " |")
+    errs = {f"{r['model']}/{r['arm']}": r["error_codes"] for r in rows if r.get("error_codes")}
+    if errs:
+        lines.append("\nErrors by arm: " + "; ".join(
+            f"{k}: " + ", ".join(f"{c}×{n}" for c, n in v.items()) for k, v in errs.items()))
     if not all(r["publication_eligible"] for r in rows):
         lines.append("\n_Pilot runs on unreviewed dev data: not for publication._")
     if any(not r["tokens_complete"] for r in rows):

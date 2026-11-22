@@ -147,3 +147,61 @@ def to_markdown(rows: list[dict[str, Any]], reference: str | None = "direct") ->
     if any(not r["tokens_complete"] for r in rows):
         lines.append("_* token usage incomplete for some cases._")
     return "\n".join(lines)
+
+
+def variance_decomposition(cases: list[dict], runs: list[dict]) -> dict[str, Any]:
+    """Share of outcome variance due to case, model, harness and their interactions.
+
+    Balanced design: every (model, harness) cell scored on the same cases, one
+    repeat. Outcome = top-1 correctness (0/1). Classical sums of squares for a
+    fully crossed case × model × harness layout; the three-way term is the
+    residual. ``harness_total`` = harness + model×harness + case×harness, the
+    part a harness change can move (cf. MedicalHarness, arXiv:2610.05778).
+    Descriptive only: no significance test, and 0/1 outcomes make the shares
+    approximate.
+    """
+    cells: dict[tuple[str, str], list[int]] = {}
+    for run in runs:
+        cfg = run["manifest"]["config"]
+        if cfg.get("repeat", 0) != 0:
+            continue
+        cells[(cfg["model"], cfg["method"])] = correctness(cases, run["records"])
+    models = sorted({m for m, _ in cells})
+    arms = sorted({a for _, a in cells})
+    if len(models) < 1 or len(arms) < 2:
+        raise ValueError("Need at least two harness arms")
+    missing = [(m, a) for m in models for a in arms if (m, a) not in cells]
+    if missing:
+        raise ValueError(f"Unbalanced design, missing cells: {missing[:5]}")
+    n_c, n_m, n_a = len(cases), len(models), len(arms)
+    y = {(c, m, a): cells[(m, a)][c] for c in range(n_c) for m in models for a in arms}
+    grand = sum(y.values()) / len(y)
+
+    def mean(**fix):
+        vals = [v for (c, m, a), v in y.items()
+                if all({"c": c, "m": m, "a": a}[k] == val for k, val in fix.items())]
+        return sum(vals) / len(vals)
+
+    mc = {c: mean(c=c) for c in range(n_c)}
+    mm = {m: mean(m=m) for m in models}
+    ma = {a: mean(a=a) for a in arms}
+    mcm = {(c, m): mean(c=c, m=m) for c in range(n_c) for m in models}
+    mca = {(c, a): mean(c=c, a=a) for c in range(n_c) for a in arms}
+    mma = {(m, a): mean(m=m, a=a) for m in models for a in arms}
+    ss = {
+        "case": n_m * n_a * sum((v - grand) ** 2 for v in mc.values()),
+        "model": n_c * n_a * sum((v - grand) ** 2 for v in mm.values()),
+        "harness": n_c * n_m * sum((v - grand) ** 2 for v in ma.values()),
+        "case_x_model": n_a * sum((mcm[c, m] - mc[c] - mm[m] + grand) ** 2
+                                  for c in range(n_c) for m in models),
+        "case_x_harness": n_m * sum((mca[c, a] - mc[c] - ma[a] + grand) ** 2
+                                    for c in range(n_c) for a in arms),
+        "model_x_harness": n_c * sum((mma[m, a] - mm[m] - ma[a] + grand) ** 2
+                                     for m in models for a in arms),
+    }
+    total = sum((v - grand) ** 2 for v in y.values())
+    ss["residual_3way"] = max(0.0, total - sum(ss.values()))
+    share = {k: (v / total if total else 0.0) for k, v in ss.items()}
+    share["harness_total"] = share["harness"] + share["model_x_harness"] + share["case_x_harness"]
+    return {"n_cases": n_c, "models": models, "harnesses": arms,
+            "sum_of_squares": ss, "total_ss": total, "share": share}

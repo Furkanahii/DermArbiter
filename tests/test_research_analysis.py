@@ -101,3 +101,22 @@ def test_dev_pilot_never_unlocks_test_split(tmp_path):
     out = _cli("run", str(path), "--split", "test", "--model", "m", "--expected-model-version", "m",
                "--max-calls", "9", "--output-dir", str(tmp_path / "o"), "--dev-pilot")
     assert out.returncode != 0 and "Data acceptance review" in out.stderr
+
+
+def test_variance_decomposition_shares_sum_and_detect_harness_effect():
+    from dermarbiter.research.analysis import variance_decomposition
+    cases = [dx_case(f"c{i}") for i in range(8)]
+    # harness effect only: vote3 always right, direct always wrong, same for both models
+    runs = []
+    for model in ("m1", "m2"):
+        for method, ans in (("direct", "Eczema"), ("vote3", "Psoriasis")):
+            run = _run(cases, method, lambda c, a=ans: a)
+            run["manifest"]["config"] = {**run["manifest"]["config"], "model": model}
+            runs.append(run)
+    out = variance_decomposition(cases, runs)
+    parts = {k: v for k, v in out["share"].items() if k != "harness_total"}
+    assert sum(parts.values()) == pytest.approx(1.0)
+    assert out["share"]["harness"] == pytest.approx(1.0)
+    assert out["share"]["model"] == pytest.approx(0.0)
+    with pytest.raises(ValueError, match="Unbalanced"):
+        variance_decomposition(cases, runs[:3])

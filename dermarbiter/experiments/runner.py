@@ -208,6 +208,7 @@ class ExperimentRunner:
                         "error": str(exc),
                     }
 
+                result.update(execution_mode="mock", publication_eligible=False)
                 fh.write(json.dumps(result, ensure_ascii=False) + "\n")
                 results.append(result)
 

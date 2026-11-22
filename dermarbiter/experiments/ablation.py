@@ -209,6 +209,11 @@ class AblationRunner:
         cases: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
         """Run a single ablation variant on all cases."""
+        if not self.mock:
+            raise NotImplementedError(
+                "AblationRunner only implements mock execution. "
+                "Use --mock for smoke tests; no live ablation was run."
+            )
         from dermarbiter.core.mock_factory import create_mock_agents, create_mock_registry
 
         agents = create_mock_agents()
@@ -303,6 +308,10 @@ class AblationRunner:
         Returns:
             Combined list of per-case result dicts across all variants.
         """
+        if not self.mock:
+            raise NotImplementedError(
+                "AblationRunner only implements mock execution. Use --mock for smoke tests."
+            )
         cases = _load_cases(self.data_path, max_cases=self.max_cases)
         if not cases:
             logger.warning("No cases loaded from %s", self.data_path)
@@ -330,6 +339,7 @@ class AblationRunner:
                 )
                 results = self._run_variant(variant, cases)
                 for r in results:
+                    r.update(execution_mode="mock", publication_eligible=False)
                     fh.write(json.dumps(r, ensure_ascii=False) + "\n")
                 all_results.extend(results)
 

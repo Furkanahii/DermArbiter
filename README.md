@@ -2,12 +2,43 @@
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg?style=flat&logo=python)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=flat)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg?style=flat&logo=github-actions)]()
 [![LangGraph](https://img.shields.io/badge/LangGraph-0.2%2B-purple.svg?style=flat)](https://github.com/langchain-ai/langgraph)
 
 > **Training-Free, Multi-Agent Collaborative Debate Framework for Equitable Dermatological Diagnosis**
 
-DermArbiter orchestrates four heterogeneous Large Language Models (LLMs) in a structured five-phase debate protocol to produce accurate, explainable, and fair dermatological diagnoses — **without requiring any additional model training or fine-tuning**. By combining frozen foundation-model tools with a novel debate architecture, DermArbiter achieves competitive diagnostic performance while providing built-in fairness guarantees across Fitzpatrick skin types I–VI. The framework is config-driven, fully reproducible, and easily extensible to new agents, tools, and benchmarks.
+DermArbiter is a research prototype that coordinates specialist, generalist,
+skeptic, and moderator roles through a five-phase workflow. It provides
+model/tool wrappers and evaluation utilities without additional model training.
+Clinical performance, calibration, and fairness require controlled validation;
+mock runs demonstrate software behavior only.
+
+## Research status — November 2026
+
+An isolated text MCQ pilot now implements direct/structured answering,
+self-refinement, independent voting, isolated panel refinement and one-round
+debate. It records actual provider usage and model versions, and scores missing
+or failed cases in the planned denominator. The Gemini REST adapter has offline
+contract tests; live API verification and an accepted main cohort are pending.
+
+- [Expanded 2026 literature and novelty assessment (Turkish)](docs/literature_expanded_2026_tr.md)
+- [Research decisions and protocol v2 (Turkish)](docs/research_decisions_v2_tr.md)
+- [Text MCQ pilot runbook](docs/text_benchmark_runbook.md)
+
+The first paper is being scoped as a controlled **text-only comparison of
+reasoning approaches**, with image-based evaluation reserved for a later phase.
+The existing experiment baseline is a legacy two-role mock scaffold with tools,
+not a single-call, tool-free baseline. Live execution is not implemented in the
+`dermarbiter.experiments` runners; they reject non-mock requests and label their
+mock outputs explicitly. The separate real E2E scripts still require validation
+for the new study protocol.
+
+- [Repository review and implementation priorities (Turkish)](docs/research_readiness_2026_tr.md)
+- [2026 literature review (Turkish)](docs/literature_2026_tr.md)
+- [Proposed text-only protocol (Turkish)](docs/text_only_protocol_2026_tr.md)
+
+Dataset preflight: `python scripts/validate_text_benchmark.py cases.jsonl`.
+This validates the proposed primary-track schema, not clinical correctness.
+Existing runners do not yet consume this new contract.
 
 ---
 
@@ -64,10 +95,10 @@ graph TD
 
 ## 🌟 Key Features
 
-- 🧠 **Training-Free Multi-LLM Debate** — Achieves top-tier performance without expensive fine-tuning.
+- 🧠 **Training-Free Multi-LLM Debate** — Provides a configurable multi-role workflow for research.
 - 🛠️ **9 Specialized Frozen Tools** — Integrates state-of-the-art vision models, knowledge graphs, and RAG databases.
-- ⚖️ **Fairness-by-Design** — Integrates our novel **Fairness Probe** to check for Fitzpatrick skin type bias and ensure equitable outcomes.
-- 🔍 **Calibrated Uncertainty** — Leverages our **Uncertainty Probe** to flag clinically ambiguous cases for human intervention.
+- ⚖️ **Subgroup Analysis Utilities** — Includes skin-tone estimation and subgroup metrics; these do not guarantee equitable outcomes.
+- 🔍 **Uncertainty Utilities** — Includes confidence-related analysis; calibration must be validated against held-out outcomes.
 - ⚡ **Structured State Machine** — Powered by LangGraph for deterministic state transitions and robust error handling.
 - ⚙️ **Config-Driven Architecture** — Configure models, prompt strategies, and debate parameters entirely via YAML files.
 - 📊 **Reproducible Experimentation** — Built-in test harness, ablation runners, and statistical metrics calculators.
@@ -252,7 +283,8 @@ DermArbiter is fully parameterized via files inside the `configs/` directory.
 
 ## 📈 Supported Clinical Benchmarks
 
-DermArbiter is evaluated on several clinical dermatology datasets:
+Dataset integrations and evaluation targets include the following. This table
+does not establish that completed clinical evaluation results are available:
 
 | Dataset | Evaluation Focus | Case Count | Skin Tones Stratified | Source Citation |
 | :--- | :--- | :--- | :--- | :--- |
